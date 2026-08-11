@@ -1,0 +1,1081 @@
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
+)
+
+package com.sales.visits
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material.icons.rounded.Storefront
+import androidx.compose.material.icons.rounded.Summarize
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.hazeChild
+import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalTime
+import java.time.ZoneOffset
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        val store = Store(applicationContext)
+        setContent { App(store) }
+    }
+}
+
+private fun uid(): String =
+    System.currentTimeMillis().toString(36) + (1000..9999).random().toString(36)
+
+private fun nowHm(): String {
+    val t = LocalTime.now(); return "%02d:%02d".format(t.hour, t.minute)
+}
+
+@Composable
+fun App(store: Store) {
+    val dark = when (store.theme) {
+        "light" -> false; "dark" -> true; else -> isSystemInDarkTheme()
+    }
+    val en = store.lang == "en"
+    SalesTheme(dark) {
+        val c = LocalSales.current
+        CompositionLocalProvider(
+            LocalLayoutDirection provides if (en) LayoutDirection.Ltr else LayoutDirection.Rtl,
+            LocalL provides if (en) EN else AR,
+        ) {
+            var tab by remember { mutableStateOf(0) }
+            var showSettings by remember { mutableStateOf(false) }
+            var editorOpen by remember { mutableStateOf(false) }
+            var editing by remember { mutableStateOf<Visit?>(null) }
+
+            Box(Modifier.fillMaxSize().background(c.bg)) {
+                when {
+                    editorOpen -> VisitEditor(store, editing) { editorOpen = false }
+                    showSettings -> SettingsScreen(store) { showSettings = false }
+                    tab == 0 -> VisitsScreen(
+                        store,
+                        onSettings = { showSettings = true },
+                        onEdit = { editing = it; editorOpen = true },
+                    )
+                    tab == 1 -> TodayScreen(store)
+                    tab == 2 -> ReportScreen(store)
+                    else -> InsightsScreen(store)
+                }
+
+                if (!showSettings && !editorOpen) {
+                    if (tab == 0) {
+                        Fab(
+                            onClick = { editing = null; editorOpen = true },
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .navigationBarsPadding()
+                                .padding(end = 18.dp, bottom = 88.dp),
+                        )
+                    }
+                    NavPill(
+                        tab = tab, onTab = { tab = it },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
+                            .padding(bottom = 12.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/* ---------------- shared bits ---------------- */
+
+@Composable
+private fun OutcomeDot(outcome: Outcome, size: Int = 8) {
+    val c = LocalSales.current
+    Box(
+        Modifier.size(size.dp).clip(CircleShape).background(outcome.color(c))
+    )
+}
+
+@Composable
+private fun Header(title: String, subtitle: String?, mark: Boolean, action: (@Composable () -> Unit)? = null) {
+    val c = LocalSales.current
+    Row(
+        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (mark) {
+                    Icon(Icons.Filled.Place, null, tint = c.ink, modifier = Modifier.size(26.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(title, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = c.ink)
+            }
+            if (subtitle != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(subtitle, fontSize = 13.5.sp, color = c.muted, fontWeight = FontWeight.Medium)
+            }
+        }
+        if (action != null) action()
+    }
+}
+
+/** A screen with a frosted-glass top header: content scrolls and blurs behind the fixed header. */
+@Composable
+private fun FrostedScaffold(header: @Composable () -> Unit, body: @Composable ColumnScope.() -> Unit) {
+    val c = LocalSales.current
+    val haze = remember { HazeState() }
+    var headerH by remember { mutableStateOf(0) }
+    val density = LocalDensity.current
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().haze(haze).verticalScroll(rememberScrollState())) {
+            Spacer(Modifier.height(with(density) { headerH.toDp() }))
+            body()
+        }
+        Box(
+            Modifier.fillMaxWidth().align(Alignment.TopCenter)
+                .onGloballyPositioned { headerH = it.size.height },
+        ) {
+            // Progressive blur: several layers of increasing blur radius, each confined
+            // to a band, so the blur STRENGTH ramps from strong (top) to zero (bottom).
+            BlurBand(haze, 7.dp, 0.55f, 1.00f)
+            BlurBand(haze, 15.dp, 0.38f, 0.75f)
+            BlurBand(haze, 25.dp, 0.22f, 0.52f)
+            BlurBand(haze, 38.dp, 0.10f, 0.33f)
+            // subtle tint scrim, also fading out
+            Box(
+                Modifier.matchParentSize().background(
+                    Brush.verticalGradient(
+                        0f to c.bg.copy(alpha = 0.5f),
+                        0.55f to c.bg.copy(alpha = 0.16f),
+                        1f to Color.Transparent,
+                    )
+                )
+            )
+            Column {
+                header()
+                Spacer(Modifier.height(64.dp)) // long fade zone below the text
+            }
+        }
+    }
+}
+
+/** One masked blur layer for the progressive-blur header. */
+@Composable
+private fun BoxScope.BlurBand(haze: HazeState, blur: Dp, fadeStart: Float, fadeEnd: Float) {
+    Box(
+        Modifier.matchParentSize()
+            .hazeChild(haze, style = HazeStyle(tint = Color.Transparent, blurRadius = blur, noiseFactor = 0f))
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        0f to Color.Black,
+                        fadeStart to Color.Black,
+                        fadeEnd to Color.Transparent,
+                    ),
+                    blendMode = BlendMode.DstIn,
+                )
+            },
+    )
+}
+
+@Composable
+private fun Fab(onClick: () -> Unit, modifier: Modifier) {
+    val c = LocalSales.current
+    Box(
+        modifier
+            .size(56.dp).clip(CircleShape).background(c.ink)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Filled.Add, "زيارة جديدة", tint = c.onInk, modifier = Modifier.size(26.dp))
+    }
+}
+
+@Composable
+private fun NavPill(tab: Int, onTab: (Int) -> Unit, modifier: Modifier) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(30.dp),
+        color = c.navBg,
+        shadowElevation = if (c.dark) 0.dp else 10.dp,
+    ) {
+        Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            NavItem(t["visits"], Icons.Rounded.Storefront, tab == 0) { onTab(0) }
+            NavItem(t["today"], Icons.Rounded.Map, tab == 1) { onTab(1) }
+            NavItem(t["report_tab"], Icons.Rounded.Summarize, tab == 2) { onTab(2) }
+            NavItem(t["insights_tab"], Icons.Rounded.Insights, tab == 3) { onTab(3) }
+        }
+    }
+}
+
+@Composable
+private fun NavItem(label: String, icon: ImageVector, on: Boolean, onClick: () -> Unit) {
+    val c = LocalSales.current
+    val fg = if (on) c.navFg else c.navFgDim
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (on) c.navActiveBg else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 7.dp)
+            .widthIn(min = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, label, tint = fg, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.height(3.dp))
+        Text(label, fontSize = 11.sp, color = fg, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal)
+    }
+}
+
+@Composable
+private fun EmptyState(icon: ImageVector, title: String, desc: String?) {
+    val c = LocalSales.current
+    Column(
+        Modifier.fillMaxWidth().padding(top = 90.dp, start = 34.dp, end = 34.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, null, tint = c.faint, modifier = Modifier.size(64.dp))
+        Spacer(Modifier.height(16.dp))
+        Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.ink2)
+        if (desc != null) {
+            Spacer(Modifier.height(5.dp))
+            Text(desc, fontSize = 13.5.sp, color = c.muted)
+        }
+    }
+}
+
+/* ---------------- visits ---------------- */
+
+@Composable
+private fun VisitsScreen(store: Store, onSettings: () -> Unit, onEdit: (Visit) -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val visits = store.visits
+    FrostedScaffold(header = {
+        Header(
+            t["visits"],
+            null,
+            mark = false,
+        ) {
+            IconButton(onClick = onSettings) {
+                Icon(Icons.Filled.Settings, t["settings"], tint = c.ink)
+            }
+        }
+    }) {
+        if (visits.isEmpty()) {
+            EmptyState(Icons.Filled.PlaylistAdd, t["empty_visits_title"], t["empty_visits_desc"])
+        } else {
+            val sorted = visits.sortedByDescending { it.date + it.time }
+            val left = sorted.filterIndexed { i, _ -> i % 2 == 0 }
+            val right = sorted.filterIndexed { i, _ -> i % 2 == 1 }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    left.forEach { VisitCard(it) { onEdit(it) } }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    right.forEach { VisitCard(it) { onEdit(it) } }
+                }
+            }
+        }
+        Spacer(Modifier.height(150.dp))
+    }
+}
+
+@Composable
+private fun VisitCard(v: Visit, onClick: () -> Unit) {
+    val c = LocalSales.current
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = c.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, c.edge),
+        shadowElevation = if (c.dark) 0.dp else 2.dp,
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            // Easlo-style card: day name, company name, then the notes body. Nothing else.
+            Text(cardDayShort(v.date), fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(7.dp))
+            Text(v.client, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = c.ink, lineHeight = 22.sp)
+            if (v.notes.isNotBlank()) {
+                Spacer(Modifier.height(9.dp))
+                Text(v.notes, fontSize = 14.sp, color = c.muted, lineHeight = 21.sp, maxLines = 9, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/* ---------------- editor + customer-info sheet ---------------- */
+
+private class VisitForm(v: Visit?) {
+    var client by mutableStateOf(v?.client ?: "")
+    var contact by mutableStateOf(v?.contact ?: "")
+    var phone by mutableStateOf(v?.phone ?: "")
+    var address by mutableStateOf(v?.address ?: "")
+    var date by mutableStateOf(v?.date ?: todayIso())
+    var time by mutableStateOf(v?.time?.ifBlank { nowHm() } ?: nowHm())
+    var type by mutableStateOf(v?.typeEnum() ?: VisitType.FOLLOW)
+    var outcome by mutableStateOf(v?.outcomeEnum() ?: Outcome.NONE)
+    var notes by mutableStateOf(v?.notes ?: "")
+    var next by mutableStateOf(v?.next ?: "")
+    var nextDate by mutableStateOf(v?.nextDate ?: "")
+    fun toVisit(id: String) = Visit(
+        id = id, client = client.trim(), contact = contact.trim(), phone = phone.trim(),
+        address = address.trim(), date = date, time = time, type = type.name, outcome = outcome.name,
+        notes = notes.trim(), next = next.trim(), nextDate = nextDate,
+    )
+}
+
+@Composable
+private fun CircleBtn(icon: ImageVector, desc: String, onClick: () -> Unit) {
+    val c = LocalSales.current
+    Box(
+        Modifier.size(40.dp).clip(CircleShape).background(if (c.dark) c.surface else Color.White)
+            .border(1.dp, c.edge, CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, desc, tint = c.ink, modifier = Modifier.size(19.dp)) }
+}
+
+@Composable
+private fun EditorField(value: String, onChange: (String) -> Unit, hint: String, textSize: TextUnit, weight: FontWeight, minLines: Int) {
+    val c = LocalSales.current
+    BasicTextField(
+        value = value,
+        onValueChange = onChange,
+        textStyle = TextStyle(color = c.ink, fontSize = textSize, fontWeight = weight, lineHeight = textSize * 1.45f),
+        cursorBrush = SolidColor(c.ink),
+        modifier = Modifier.fillMaxWidth(),
+        minLines = minLines,
+        decorationBox = { inner ->
+            if (value.isEmpty()) Text(hint, color = c.faint, fontSize = textSize, fontWeight = weight, lineHeight = textSize * 1.45f)
+            inner()
+        },
+    )
+}
+
+@Composable
+private fun VisitEditor(store: Store, editing: Visit?, onClose: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val form = remember(editing?.id ?: "new") { VisitForm(editing) }
+    var infoOpen by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var showDate by remember { mutableStateOf(false) }
+
+    fun done() {
+        if (form.client.isNotBlank()) store.upsert(form.toVisit(editing?.id ?: uid()))
+        onClose()
+    }
+    BackHandler { done() }
+
+    Column(Modifier.fillMaxSize().background(c.bg)) {
+        Row(
+            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircleBtn(if (t.en) Icons.Filled.ArrowBackIosNew else Icons.Filled.ArrowForwardIos, t["done"]) { done() }
+            Spacer(Modifier.width(10.dp))
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = if (c.dark) c.surface else Color.White,
+                border = androidx.compose.foundation.BorderStroke(1.dp, c.edge),
+                onClick = { showDate = true },
+            ) {
+                Text(fullDay(form.date), Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                    color = c.ink2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.weight(1f))
+            CircleBtn(Icons.Filled.PersonOutline, t["customer_info"]) { infoOpen = true }
+            Spacer(Modifier.width(8.dp))
+            Box {
+                CircleBtn(Icons.Filled.MoreHoriz, t["more"]) { menuOpen = true }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text(t["customer_info"]) }, onClick = { menuOpen = false; infoOpen = true })
+                    if (editing != null) DropdownMenuItem(
+                        text = { Text(t["delete_visit"], color = c.lost) },
+                        onClick = { menuOpen = false; store.delete(editing.id); onClose() },
+                    )
+                }
+            }
+        }
+
+        Column(Modifier.fillMaxSize().padding(horizontal = 22.dp).verticalScroll(rememberScrollState())) {
+            Spacer(Modifier.height(6.dp))
+            EditorField(form.client, { form.client = it }, t["client_name_hint"], 24.sp, FontWeight.ExtraBold, 1)
+            Spacer(Modifier.height(10.dp))
+            EditorField(form.notes, { form.notes = it }, t["notes_hint"], 16.sp, FontWeight.Normal, 6)
+            Spacer(Modifier.height(120.dp))
+        }
+    }
+
+    if (infoOpen) InfoSheet(form, editing != null,
+        onDelete = { editing?.let { store.delete(it.id) }; onClose() },
+        onDismiss = { infoOpen = false })
+    if (showDate) DatePick(form.date) { form.date = it; showDate = false }
+}
+
+@Composable
+private fun InfoSheet(form: VisitForm, editing: Boolean, onDelete: () -> Unit, onDismiss: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val ctx = LocalContext.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showTime by remember { mutableStateOf(false) }
+    var showNextDate by remember { mutableStateOf(false) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = c.bg) {
+        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState())) {
+            Text(t["customer_info"], fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = c.ink, modifier = Modifier.padding(bottom = 14.dp))
+
+            Field(t["contact_person"], form.contact, { form.contact = it }, t["contact_hint"])
+
+            LabeledBlock(t["phone"]) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Input(form.phone, { form.phone = it }, t["phone_hint"], Modifier.weight(1f), KeyboardType.Phone)
+                    if (form.phone.isNotBlank()) {
+                        Box(
+                            Modifier.height(52.dp).clip(RoundedCornerShape(12.dp)).background(c.ink)
+                                .clickable { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + form.phone.trim()))) }
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Phone, null, tint = c.onInk, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(t["call"], color = c.onInk, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Field(t["address"], form.address, { form.address = it }, t["address_hint"])
+            PickerField(t["time"], fmtTime(form.time), Modifier.fillMaxWidth()) { showTime = true }
+
+            LabeledBlock(t["visit_type"]) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    VisitType.values().forEach { vt -> ChoiceChip(vt.label(t.en), form.type == vt) { form.type = vt } }
+                }
+            }
+            LabeledBlock(t["outcome"]) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Outcome.values().forEach { o -> ChoiceChip(o.label(t.en), form.outcome == o, o.color(c)) { form.outcome = o } }
+                }
+            }
+
+            Field(t["next_step"], form.next, { form.next = it }, t["next_hint"])
+            PickerField(t["follow_date"], if (form.nextDate.isBlank()) t["none"] else fullDay(form.nextDate), Modifier.fillMaxWidth()) { showNextDate = true }
+
+            if (editing) {
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = onDelete, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.DeleteOutline, null, tint = c.lost, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(t["delete_visit"], color = c.lost, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    if (showTime) TimePick(form.time) { form.time = it; showTime = false }
+    if (showNextDate) DatePick(form.nextDate.ifBlank { todayIso() }) { form.nextDate = it; showNextDate = false }
+}
+
+@Composable
+private fun ChoiceChip(text: String, selected: Boolean, selColor: Color? = null, onClick: () -> Unit) {
+    val c = LocalSales.current
+    val bg = if (selected) (selColor ?: c.ink) else c.sunk
+    // contrast the label against the actual chip colour (fixes white-on-light in dark mode)
+    val fg = if (selected) (if (bg.luminance() > 0.5f) Color(0xFF0B0B0B) else Color.White) else c.ink2
+    Surface(shape = RoundedCornerShape(11.dp), color = bg, onClick = onClick) {
+        Text(text, Modifier.padding(horizontal = 15.dp, vertical = 10.dp), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fg)
+    }
+}
+
+@Composable
+private fun LabeledBlock(label: String, content: @Composable () -> Unit) {
+    val c = LocalSales.current
+    Column(Modifier.fillMaxWidth().padding(bottom = 15.dp)) {
+        Text(label, fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 7.dp))
+        content()
+    }
+}
+
+@Composable
+private fun Input(value: String, onChange: (String) -> Unit, hint: String, modifier: Modifier = Modifier, kb: KeyboardType = KeyboardType.Text) {
+    val c = LocalSales.current
+    TextField(
+        value = value, onValueChange = onChange, modifier = modifier.fillMaxWidth(),
+        placeholder = { Text(hint, color = c.faint) },
+        singleLine = kb != KeyboardType.Text || true,
+        keyboardOptions = KeyboardOptions(keyboardType = kb),
+        shape = RoundedCornerShape(12.dp),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = c.surface, unfocusedContainerColor = c.sunk,
+            focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+            focusedTextColor = c.ink, unfocusedTextColor = c.ink, cursorColor = c.ink,
+        ),
+    )
+}
+
+@Composable
+private fun Field(label: String, value: String, onChange: (String) -> Unit, hint: String) {
+    LabeledBlock(label) { Input(value, onChange, hint) }
+}
+
+@Composable
+private fun MultiField(label: String, value: String, onChange: (String) -> Unit, hint: String) {
+    val c = LocalSales.current
+    LabeledBlock(label) {
+        TextField(
+            value = value, onValueChange = onChange,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp),
+            placeholder = { Text(hint, color = c.faint) },
+            shape = RoundedCornerShape(12.dp),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = c.surface, unfocusedContainerColor = c.sunk,
+                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                focusedTextColor = c.ink, unfocusedTextColor = c.ink, cursorColor = c.ink,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun PickerField(label: String, shown: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val c = LocalSales.current
+    Column(modifier) {
+        Text(label, fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 7.dp))
+        Surface(shape = RoundedCornerShape(12.dp), color = c.sunk, onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+            Text(shown, Modifier.padding(horizontal = 14.dp, vertical = 15.dp), color = c.ink, fontSize = 15.sp)
+        }
+    }
+}
+
+@Composable
+private fun DatePick(initialIso: String, onPicked: (String) -> Unit) {
+    val c = LocalSales.current
+    val init = parseIso(initialIso)?.atStartOfDay(ZoneOffset.UTC)?.toInstant()?.toEpochMilli()
+    val state = rememberDatePickerState(initialSelectedDateMillis = init)
+    DatePickerDialog(
+        onDismissRequest = { onPicked(initialIso) },
+        confirmButton = {
+            TextButton(onClick = {
+                val ms = state.selectedDateMillis
+                if (ms != null) {
+                    val d = Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate()
+                    onPicked(d.toString())
+                } else onPicked(initialIso)
+            }) { Text(LocalL.current["done"], color = c.ink) }
+        },
+    ) { DatePicker(state = state) }
+}
+
+@Composable
+private fun TimePick(initial: String, onPicked: (String) -> Unit) {
+    val c = LocalSales.current
+    val parts = initial.split(":")
+    val state = rememberTimePickerState(
+        initialHour = parts.getOrNull(0)?.toIntOrNull() ?: 12,
+        initialMinute = parts.getOrNull(1)?.toIntOrNull() ?: 0,
+        is24Hour = false,
+    )
+    Dialog(onDismissRequest = { onPicked(initial) }) {
+        Surface(shape = RoundedCornerShape(24.dp), color = c.surface) {
+            Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                TimePicker(state = state)
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { onPicked("%02d:%02d".format(state.hour, state.minute)) }) {
+                    Text(LocalL.current["done"], color = c.ink, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+/* ---------------- report ---------------- */
+
+@Composable
+private fun ReportScreen(store: Store) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val ctx = LocalContext.current
+    val clip = LocalClipboardManager.current
+    var offset by remember { mutableStateOf(0) }
+    val vs = weekVisits(store.visits, offset)
+    val clients = vs.map { it.client }.toSet().size
+    val succ = vs.count { it.outcomeEnum() == Outcome.SUCCESS }
+
+    FrostedScaffold(header = { Header(t["report_title"], weekLabel(offset), mark = false) }) {
+        // week toggle
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp)) {
+            Surface(shape = RoundedCornerShape(12.dp), color = c.sunk, modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(3.dp)) {
+                    SegBtn(t["this_week"], offset == 0, Modifier.weight(1f)) { offset = 0 }
+                    SegBtn(t["last_week"], offset == 1, Modifier.weight(1f)) { offset = 1 }
+                }
+            }
+        }
+        Card {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Stat(vs.size.toString(), t["stat_visits"])
+                Stat(clients.toString(), t["stat_clients"])
+                Stat(succ.toString(), t["stat_success"])
+            }
+        }
+        if (vs.isEmpty()) {
+            EmptyState(Icons.Filled.Inbox, t["empty_week"], null)
+        } else {
+            val maxT = VisitType.values().maxOf { vt -> vs.count { it.typeEnum() == vt } }.coerceAtLeast(1)
+            Card {
+                SectionTitle(t["by_type"])
+                VisitType.values().forEach { vt ->
+                    val n = vs.count { it.typeEnum() == vt }
+                    if (n > 0) BarRow(vt.label(t.en), n, maxT, c.ink)
+                }
+            }
+            Card {
+                SectionTitle(t["week_details"])
+                var lastD: String? = null
+                vs.forEach { v ->
+                    if (v.date != lastD) {
+                        Text(fullDay(v.date), fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                        lastD = v.date
+                    }
+                    Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
+                        Box(Modifier.padding(top = 6.dp).size(7.dp).clip(CircleShape).background(v.outcomeEnum().color(c)))
+                        Spacer(Modifier.width(9.dp))
+                        Text(buildString {
+                            append(v.client); append(" — "); append(v.typeEnum().label(t.en))
+                            if (v.notes.isNotBlank()) append(" · ${v.notes}")
+                        }, fontSize = 14.sp, color = c.ink2, lineHeight = 20.sp)
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(c.ink)
+                    .clickable {
+                        clip.setText(AnnotatedString(reportText(store.visits, offset)))
+                    }.padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.ContentCopy, null, tint = c.onInk, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(8.dp)); Text(t["copy"], color = c.onInk, fontWeight = FontWeight.Bold)
+                }
+            }
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
+                    .border(1.dp, c.edge, RoundedCornerShape(14.dp)).background(c.surface)
+                    .clickable {
+                        val i = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"; putExtra(Intent.EXTRA_TEXT, reportText(store.visits, offset))
+                        }
+                        ctx.startActivity(Intent.createChooser(i, t["share_report"]))
+                    }.padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Share, null, tint = c.ink, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(8.dp)); Text(t["share"], color = c.ink, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        Spacer(Modifier.height(150.dp))
+    }
+}
+
+@Composable
+private fun SegBtn(text: String, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val c = LocalSales.current
+    Surface(
+        modifier = modifier, shape = RoundedCornerShape(9.dp),
+        color = if (on) c.surface else Color.Transparent,
+        shadowElevation = if (on && !c.dark) 1.dp else 0.dp,
+        onClick = onClick,
+    ) {
+        Text(text, Modifier.padding(vertical = 9.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            color = if (on) c.ink else c.muted, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+    }
+}
+
+/* ---------------- insights ---------------- */
+
+@Composable
+private fun InsightsScreen(store: Store) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val visits = store.visits
+    FrostedScaffold(header = { Header(t["insights_tab"], t["insights_sub"], mark = false) }) {
+        if (visits.isEmpty()) {
+            EmptyState(Icons.Filled.BarChart, t["empty_insights"], null)
+        } else {
+            val byClient = visits.groupingBy { it.client }.eachCount()
+            Card {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Stat(visits.size.toString(), t["total"])
+                    Stat(byClient.size.toString(), t["stat_clients"])
+                    Stat(visits.count { it.outcomeEnum() == Outcome.SUCCESS }.toString(), t["stat_success"])
+                }
+            }
+            val maxO = Outcome.values().maxOf { o -> visits.count { it.outcomeEnum() == o } }.coerceAtLeast(1)
+            Card {
+                SectionTitle(t["by_outcome"])
+                Outcome.values().forEach { o ->
+                    val n = visits.count { it.outcomeEnum() == o }
+                    if (n > 0) BarRow(o.label(t.en), n, maxO, o.color(c))
+                }
+            }
+            val top = byClient.entries.sortedByDescending { it.value }.take(5)
+            if (top.isNotEmpty()) {
+                val maxC = top.first().value
+                Card {
+                    SectionTitle(t["top_clients"])
+                    top.forEach { BarRow(it.key, it.value, maxC, c.ink) }
+                }
+            }
+            val ups = visits.filter { it.next.isNotBlank() && it.nextDate.isNotBlank() && it.nextDate >= todayIso() }
+                .sortedBy { it.nextDate }.take(6)
+            if (ups.isNotEmpty()) {
+                Card {
+                    SectionTitle(t["upcoming"])
+                    ups.forEach { v ->
+                        Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
+                            Box(Modifier.padding(top = 6.dp).size(7.dp).clip(CircleShape).background(c.ink))
+                            Spacer(Modifier.width(9.dp))
+                            Text("${v.client} — ${v.next} · ${fullDay(v.nextDate)}", fontSize = 14.sp, color = c.ink2, lineHeight = 20.sp)
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(150.dp))
+    }
+}
+
+/* ---------------- today (roadmap) ---------------- */
+
+@Composable
+private fun TodayScreen(store: Store) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val items = store.todayPlan()
+    var newClient by remember { mutableStateOf("") }
+
+    FrostedScaffold(header = { Header(t["today_title"], t["today_sub"], mark = false) }) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Input(newClient, { newClient = it }, t["add_client_hint"], Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier.size(52.dp).clip(CircleShape).background(c.ink)
+                    .clickable { store.addPlan(newClient); newClient = "" },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Add, t["add_client_hint"], tint = c.onInk, modifier = Modifier.size(24.dp)) }
+        }
+
+        if (items.isEmpty()) {
+            EmptyState(Icons.Rounded.Map, t["empty_today_title"], t["empty_today_desc"])
+        } else {
+            val done = items.count { it.done }
+            Text(
+                "$done / ${items.size} ${t["stops_done"]}",
+                fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 4.dp, bottom = 6.dp),
+            )
+            Column(Modifier.padding(horizontal = 18.dp)) {
+                items.forEachIndexed { i, item ->
+                    RoadStop(
+                        index = i + 1, item = item, first = i == 0, last = i == items.lastIndex,
+                        onToggle = { store.togglePlan(item.id) }, onDelete = { store.deletePlan(item.id) },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(150.dp))
+    }
+}
+
+@Composable
+private fun RoadStop(index: Int, item: PlanItem, first: Boolean, last: Boolean, onToggle: () -> Unit, onDelete: () -> Unit) {
+    val c = LocalSales.current
+    Row(Modifier.height(IntrinsicSize.Min)) {
+        // rail: connecting line + node
+        Box(Modifier.width(40.dp).fillMaxHeight()) {
+            if (!first) Box(Modifier.align(Alignment.TopCenter).width(2.5.dp).fillMaxHeight(0.5f).background(c.faint))
+            if (!last) Box(Modifier.align(Alignment.BottomCenter).width(2.5.dp).fillMaxHeight(0.5f).background(c.faint))
+            Box(
+                Modifier.align(Alignment.Center).size(30.dp).clip(CircleShape)
+                    .background(if (item.done) c.ink else c.surface)
+                    .border(2.dp, if (item.done) c.ink else c.muted, CircleShape)
+                    .clickable(onClick = onToggle),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (item.done) Icon(Icons.Filled.Check, null, tint = c.onInk, modifier = Modifier.size(17.dp))
+                else Text("$index", color = c.ink2, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Surface(
+            modifier = Modifier.weight(1f).padding(vertical = 6.dp),
+            shape = RoundedCornerShape(16.dp), color = c.surface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, c.edge),
+            shadowElevation = if (c.dark) 0.dp else 2.dp,
+            onClick = onToggle,
+        ) {
+            Row(Modifier.padding(start = 16.dp, end = 6.dp).height(52.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    item.client, modifier = Modifier.weight(1f),
+                    color = if (item.done) c.muted else c.ink,
+                    fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    textDecoration = if (item.done) TextDecoration.LineThrough else null,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                IconButton(onClick = onDelete) { Icon(Icons.Filled.Close, "حذف", tint = c.faint, modifier = Modifier.size(18.dp)) }
+            }
+        }
+    }
+}
+
+/* ---------------- settings ---------------- */
+
+@Composable
+private fun SettingsScreen(store: Store, onBack: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    var confirmClear by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 8.dp, end = 22.dp, top = 14.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Filled.Close, t["done"], tint = c.ink) }
+            Text(t["settings"], fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = c.ink)
+        }
+
+        GroupCard {
+            Text(t["appearance"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
+            Row(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ThemeChip(t["theme_auto"], store.theme == "auto", Modifier.weight(1f)) { store.chooseTheme("auto") }
+                ThemeChip(t["theme_light"], store.theme == "light", Modifier.weight(1f)) { store.chooseTheme("light") }
+                ThemeChip(t["theme_dark"], store.theme == "dark", Modifier.weight(1f)) { store.chooseTheme("dark") }
+            }
+        }
+
+        GroupCard {
+            Text(t["language"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
+            Row(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ThemeChip(t["lang_ar"], store.lang == "ar", Modifier.weight(1f)) { store.chooseLang("ar") }
+                ThemeChip(t["lang_en"], store.lang == "en", Modifier.weight(1f)) { store.chooseLang("en") }
+            }
+        }
+
+        UpdateSection()
+
+        GroupCard {
+            SettingsRow(Icons.Filled.DeleteOutline, t["delete_all"], danger = true) { confirmClear = true }
+        }
+
+        GroupCard {
+            SettingsRow(Icons.Filled.Info, t["about"], value = t["version"]) {}
+        }
+        Spacer(Modifier.height(40.dp))
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            confirmButton = { TextButton(onClick = { store.clearAll(); confirmClear = false }) { Text(t["delete"], color = c.lost) } },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(t["cancel"], color = c.muted) } },
+            title = { Text(t["delete_all_q"]) },
+            text = { Text(t["delete_all_desc"]) },
+            containerColor = c.surface,
+        )
+    }
+}
+
+@Composable
+private fun UpdateSection() {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf("") }
+    var info by remember { mutableStateOf<UpdateInfo?>(null) }
+    var busy by remember { mutableStateOf(false) }
+
+    GroupCard {
+        val label = if (info != null) "${t["install_update"]} (${info!!.versionName})" else t["check_update"]
+        val value = status.ifBlank { "v" + AppUpdater.currentVersionName(ctx) }
+        SettingsRow(Icons.Filled.SystemUpdate, label, value = value) {
+            if (busy) return@SettingsRow
+            val i = info
+            if (i == null) {
+                busy = true; status = t["checking"]
+                scope.launch {
+                    try {
+                        val r = AppUpdater.check(ctx)
+                        if (r == null) status = t["up_to_date"]
+                        else { info = r; status = "${t["update_available"]} v${r.versionName}" }
+                    } catch (e: Exception) {
+                        status = t["update_failed"]
+                    } finally { busy = false }
+                }
+            } else {
+                if (!AppUpdater.canInstall(ctx)) { ctx.startActivity(AppUpdater.installPermissionIntent(ctx)); return@SettingsRow }
+                busy = true; status = t["downloading"]
+                scope.launch {
+                    try {
+                        val f = AppUpdater.download(ctx, i) { p -> status = "${t["downloading"]} ${(p * 100).toInt()}%" }
+                        AppUpdater.install(ctx, f)
+                        status = ""
+                    } catch (e: Exception) {
+                        status = t["update_failed"]
+                    } finally { busy = false }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeChip(text: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val c = LocalSales.current
+    Surface(shape = RoundedCornerShape(11.dp), color = if (on) c.ink else c.sunk, onClick = onClick, modifier = modifier) {
+        Text(text, Modifier.padding(vertical = 11.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            color = if (on) c.onInk else c.ink2, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+    }
+}
+
+@Composable
+private fun SettingsRow(icon: ImageVector, label: String, value: String? = null, danger: Boolean = false, onClick: () -> Unit) {
+    val c = LocalSales.current
+    val tint = if (danger) c.lost else c.ink2
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, color = if (danger) c.lost else c.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        if (value != null) Text(value, color = c.muted, fontSize = 13.sp)
+        else if (!danger) Icon(Icons.Filled.KeyboardArrowLeft, null, tint = c.faint, modifier = Modifier.size(20.dp))
+    }
+}
+
+/* ---------------- small shared ---------------- */
+
+@Composable
+private fun Card(content: @Composable ColumnScope.() -> Unit) {
+    val c = LocalSales.current
+    Surface(
+        shape = RoundedCornerShape(16.dp), color = c.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, c.edge),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
+    ) {
+        Column(Modifier.padding(16.dp), content = content)
+    }
+}
+
+@Composable
+private fun GroupCard(content: @Composable ColumnScope.() -> Unit) {
+    val c = LocalSales.current
+    Surface(
+        shape = RoundedCornerShape(16.dp), color = c.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, c.edge),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
+    ) { Column(content = content) }
+}
+
+@Composable
+private fun SectionTitle(t: String) {
+    val c = LocalSales.current
+    Text(t, fontSize = 13.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
+}
+
+@Composable
+private fun RowScope.Stat(n: String, label: String) {
+    val c = LocalSales.current
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f).padding(vertical = 6.dp)) {
+        Text(n, fontSize = 27.sp, fontWeight = FontWeight.ExtraBold, color = c.ink)
+        Spacer(Modifier.height(4.dp))
+        Text(label, fontSize = 12.sp, color = c.muted, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun BarRow(label: String, value: Int, max: Int, color: Color) {
+    val c = LocalSales.current
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 14.sp, color = c.ink2, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(82.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(99.dp)).background(c.sunk)) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(value.toFloat() / max).clip(RoundedCornerShape(99.dp)).background(color))
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(value.toString(), fontSize = 14.sp, color = c.ink2, fontWeight = FontWeight.Bold, modifier = Modifier.width(22.dp))
+    }
+}
