@@ -39,6 +39,18 @@ data class Visit(
     val nextDate: String = "",
 )
 
+/** A reusable customer record. Visits remain linked by the normalized customer name. */
+@Serializable
+data class Customer(
+    val id: String,
+    val name: String,
+    val contact: String = "",
+    val phone: String = "",
+    val address: String = "",
+    val notes: String = "",
+    val createdAt: String = "",
+)
+
 /** A client planned to be visited on a given day (the "Today" plan). */
 @Serializable
 data class PlanItem(
@@ -46,6 +58,16 @@ data class PlanItem(
     val client: String,
     val date: String,       // yyyy-MM-dd
     val done: Boolean = false,
+)
+
+/** Versioned portable payload used by the settings backup/import flow. */
+@Serializable
+data class AppBackup(
+    val version: Int = 1,
+    val exportedAt: String,
+    val visits: List<Visit>,
+    val customers: List<Customer>,
+    val plan: List<PlanItem>,
 )
 
 fun Visit.typeEnum(): VisitType = runCatching { VisitType.valueOf(type) }.getOrDefault(VisitType.OTHER)

@@ -5,13 +5,19 @@
 
 package com.sales.visits
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -60,6 +66,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.ContextCompat
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.haze
@@ -91,32 +98,57 @@ fun App(store: Store) {
         "light" -> false; "dark" -> true; else -> isSystemInDarkTheme()
     }
     val en = store.lang == "en"
-    SalesTheme(dark) {
+    SalesTheme(dark, en) {
         val c = LocalSales.current
         CompositionLocalProvider(
             LocalLayoutDirection provides if (en) LayoutDirection.Ltr else LayoutDirection.Rtl,
             LocalL provides if (en) EN else AR,
         ) {
+            val ctx = LocalContext.current
+            var notificationGranted by remember { mutableStateOf(ReminderScheduler.notificationsEnabled(ctx)) }
+            val notificationPermission = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { granted -> notificationGranted = granted }
             var tab by remember { mutableStateOf(0) }
             var showSettings by remember { mutableStateOf(false) }
+            var showCustomers by remember { mutableStateOf(false) }
+            var customerEditorOpen by remember { mutableStateOf(false) }
+            var editingCustomer by remember { mutableStateOf<Customer?>(null) }
             var editorOpen by remember { mutableStateOf(false) }
             var editing by remember { mutableStateOf<Visit?>(null) }
 
             Box(Modifier.fillMaxSize().background(c.bg)) {
                 when {
                     editorOpen -> VisitEditor(store, editing) { editorOpen = false }
+                    customerEditorOpen -> CustomerEditor(store, editingCustomer) { customerEditorOpen = false }
+                    showCustomers -> CustomersScreen(
+                        store,
+                        onBack = { showCustomers = false },
+                        onAdd = { editingCustomer = null; customerEditorOpen = true },
+                        onEdit = { editingCustomer = it; customerEditorOpen = true },
+                    )
                     showSettings -> SettingsScreen(store) { showSettings = false }
                     tab == 0 -> VisitsScreen(
                         store,
                         onSettings = { showSettings = true },
+                        onCustomers = { showCustomers = true },
                         onEdit = { editing = it; editorOpen = true },
                     )
-                    tab == 1 -> TodayScreen(store)
+                    tab == 1 -> TodayScreen(
+                        store,
+                        notificationsEnabled = notificationGranted,
+                        onEnableNotifications = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                            ) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        },
+                        onEdit = { editing = it; editorOpen = true },
+                    )
                     tab == 2 -> ReportScreen(store)
                     else -> InsightsScreen(store)
                 }
 
-                if (!showSettings && !editorOpen) {
+                if (!showSettings && !editorOpen && !showCustomers && !customerEditorOpen) {
                     if (tab == 0) {
                         Fab(
                             onClick = { editing = null; editorOpen = true },
@@ -162,7 +194,7 @@ private fun Header(title: String, subtitle: String?, mark: Boolean, action: (@Co
                     Icon(Icons.Filled.Place, null, tint = c.ink, modifier = Modifier.size(26.dp))
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(title, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = c.ink)
+                Text(title, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink)
             }
             if (subtitle != null) {
                 Spacer(Modifier.height(6.dp))
@@ -305,7 +337,7 @@ private fun EmptyState(icon: ImageVector, title: String, desc: String?) {
 /* ---------------- visits ---------------- */
 
 @Composable
-private fun VisitsScreen(store: Store, onSettings: () -> Unit, onEdit: (Visit) -> Unit) {
+private fun VisitsScreen(store: Store, onSettings: () -> Unit, onCustomers: () -> Unit, onEdit: (Visit) -> Unit) {
     val c = LocalSales.current
     val t = LocalL.current
     val visits = store.visits
@@ -315,8 +347,13 @@ private fun VisitsScreen(store: Store, onSettings: () -> Unit, onEdit: (Visit) -
             null,
             mark = false,
         ) {
-            IconButton(onClick = onSettings) {
-                Icon(Icons.Filled.Settings, t["settings"], tint = c.ink)
+            Row {
+                IconButton(onClick = onCustomers) {
+                    Icon(Icons.Filled.PeopleAlt, t["customers"], tint = c.ink)
+                }
+                IconButton(onClick = onSettings) {
+                    Icon(Icons.Filled.Settings, t["settings"], tint = c.ink)
+                }
             }
         }
     }) {
@@ -365,6 +402,204 @@ private fun VisitCard(v: Visit, onClick: () -> Unit) {
     }
 }
 
+/* ---------------- customers ---------------- */
+
+@Composable
+private fun CustomersScreen(store: Store, onBack: () -> Unit, onAdd: () -> Unit, onEdit: (Customer) -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    var query by remember { mutableStateOf("") }
+    BackHandler(onBack = onBack)
+    val filtered = store.customers.filter { customer ->
+        query.isBlank() || listOf(customer.name, customer.contact, customer.phone)
+            .any { it.contains(query.trim(), ignoreCase = true) }
+    }
+
+    FrostedScaffold(header = {
+        Row(
+            Modifier.fillMaxWidth().statusBarsPadding().padding(start = 10.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(if (t.en) Icons.Filled.ArrowBackIosNew else Icons.Filled.ArrowForwardIos, t["done"], tint = c.ink)
+            }
+            Text(t["customers"], fontSize = 27.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink, modifier = Modifier.weight(1f))
+            IconButton(onClick = onAdd) { Icon(Icons.Filled.PersonAddAlt1, t["add_customer"], tint = c.ink) }
+        }
+    }) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Input(query, { query = it }, t["search_customers"], Modifier.weight(1f))
+        }
+        if (filtered.isEmpty()) {
+            EmptyState(
+                if (query.isBlank()) Icons.Filled.PeopleAlt else Icons.Filled.SearchOff,
+                if (query.isBlank()) t["empty_customers"] else t["no_results"],
+                if (query.isBlank()) t["empty_customers_desc"] else null,
+            )
+        } else {
+            Column(Modifier.padding(horizontal = 18.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                filtered.forEach { customer ->
+                    CustomerRow(customer, store.visitsFor(customer), onClick = { onEdit(customer) })
+                }
+            }
+        }
+        Spacer(Modifier.height(80.dp))
+    }
+}
+
+@Composable
+private fun CustomerRow(customer: Customer, visits: List<Visit>, onClick: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val ctx = LocalContext.current
+    val last = visits.firstOrNull()
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp), color = c.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, c.edge),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(46.dp).clip(CircleShape).background(c.sunk), contentAlignment = Alignment.Center) {
+                Text(customer.name.trim().take(1).uppercase(), color = c.ink, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(customer.name, color = c.ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(4.dp))
+                val detail = when {
+                    last != null -> "${visits.size} ${t["visit_count"]} · ${cardDay(last.date)}"
+                    customer.contact.isNotBlank() -> customer.contact
+                    else -> t["no_visits"]
+                }
+                Text(detail, color = c.muted, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (customer.phone.isNotBlank()) {
+                IconButton(onClick = { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + customer.phone))) }) {
+                    Icon(Icons.Filled.Phone, t["call"], tint = c.ink2, modifier = Modifier.size(20.dp))
+                }
+            } else {
+                Icon(Icons.Filled.KeyboardArrowLeft, null, tint = c.faint)
+            }
+        }
+    }
+}
+
+private class CustomerForm(customer: Customer?) {
+    val id = customer?.id ?: uid()
+    var name by mutableStateOf(customer?.name ?: "")
+    var contact by mutableStateOf(customer?.contact ?: "")
+    var phone by mutableStateOf(customer?.phone ?: "")
+    var address by mutableStateOf(customer?.address ?: "")
+    var notes by mutableStateOf(customer?.notes ?: "")
+    val createdAt = customer?.createdAt?.ifBlank { todayIso() } ?: todayIso()
+
+    fun toCustomer() = Customer(
+        id = id, name = name, contact = contact, phone = phone,
+        address = address, notes = notes, createdAt = createdAt,
+    )
+}
+
+@Composable
+private fun CustomerEditor(store: Store, editing: Customer?, onClose: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val ctx = LocalContext.current
+    val form = remember(editing?.id ?: "new-customer") { CustomerForm(editing) }
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    fun done() {
+        if (form.name.isNotBlank()) store.upsertCustomer(form.toCustomer())
+        onClose()
+    }
+    BackHandler { done() }
+    val history = editing?.let(store::visitsFor).orEmpty()
+
+    Column(Modifier.fillMaxSize().background(c.bg)) {
+        Row(
+            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircleBtn(if (t.en) Icons.Filled.ArrowBackIosNew else Icons.Filled.ArrowForwardIos, t["done"]) { done() }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                if (editing == null) t["new_customer"] else t["customer_details"],
+                color = c.ink, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, modifier = Modifier.weight(1f),
+            )
+            if (editing != null) {
+                IconButton(onClick = { confirmDelete = true }) {
+                    Icon(Icons.Filled.DeleteOutline, t["delete_customer"], tint = c.lost)
+                }
+            }
+        }
+
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+            Spacer(Modifier.height(8.dp))
+            Field(t["customer_name"], form.name, { form.name = it }, t["client_name_hint"])
+            Field(t["contact_person"], form.contact, { form.contact = it }, t["contact_hint"])
+            LabeledBlock(t["phone"]) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Input(form.phone, { form.phone = it }, t["phone_hint"], Modifier.weight(1f), KeyboardType.Phone)
+                    if (form.phone.isNotBlank()) {
+                        Box(
+                            Modifier.height(52.dp).clip(RoundedCornerShape(12.dp)).background(c.ink)
+                                .clickable { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + form.phone.trim()))) }
+                                .padding(horizontal = 16.dp), contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Filled.Phone, t["call"], tint = c.onInk, modifier = Modifier.size(19.dp)) }
+                    }
+                }
+            }
+            Field(t["address"], form.address, { form.address = it }, t["address_hint"])
+            MultiField(t["customer_notes"], form.notes, { form.notes = it }, t["customer_notes_hint"])
+
+            if (editing != null) {
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Stat(history.size.toString(), t["stat_visits"])
+                    Stat(history.count { it.outcomeEnum() == Outcome.SUCCESS }.toString(), t["stat_success"])
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(t["visit_history"], color = c.muted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                if (history.isEmpty()) {
+                    Text(t["no_visits"], color = c.muted, fontSize = 14.sp, modifier = Modifier.padding(vertical = 14.dp))
+                } else {
+                    history.forEach { visit ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp), color = c.surface,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, c.edge),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        ) {
+                            Column(Modifier.padding(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    OutcomeDot(visit.outcomeEnum())
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(fullDay(visit.date), color = c.ink2, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+                                if (visit.notes.isNotBlank()) {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(visit.notes, color = c.muted, fontSize = 13.5.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(50.dp))
+        }
+    }
+
+    if (confirmDelete && editing != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            confirmButton = { TextButton(onClick = { store.deleteCustomer(editing.id); confirmDelete = false; onClose() }) { Text(t["delete"], color = c.lost) } },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(t["cancel"], color = c.muted) } },
+            title = { Text(t["delete_customer_q"]) },
+            text = { Text(t["delete_customer_desc"]) },
+            containerColor = c.surface,
+        )
+    }
+}
+
 /* ---------------- editor + customer-info sheet ---------------- */
 
 private class VisitForm(v: Visit?) {
@@ -402,7 +637,7 @@ private fun EditorField(value: String, onChange: (String) -> Unit, hint: String,
     BasicTextField(
         value = value,
         onValueChange = onChange,
-        textStyle = TextStyle(color = c.ink, fontSize = textSize, fontWeight = weight, lineHeight = textSize * 1.45f),
+        textStyle = TextStyle(color = c.ink, fontSize = textSize, fontWeight = weight, fontFamily = LocalAppFont.current, lineHeight = textSize * 1.45f),
         cursorBrush = SolidColor(c.ink),
         modifier = Modifier.fillMaxWidth(),
         minLines = minLines,
@@ -819,13 +1054,54 @@ private fun InsightsScreen(store: Store) {
 /* ---------------- today (roadmap) ---------------- */
 
 @Composable
-private fun TodayScreen(store: Store) {
+private fun TodayScreen(
+    store: Store,
+    notificationsEnabled: Boolean,
+    onEnableNotifications: () -> Unit,
+    onEdit: (Visit) -> Unit,
+) {
     val c = LocalSales.current
     val t = LocalL.current
     val items = store.todayPlan()
+    val due = store.dueFollowUps()
     var newClient by remember { mutableStateOf("") }
 
-    FrostedScaffold(header = { Header(t["today_title"], t["today_sub"], mark = false) }) {
+    FrostedScaffold(header = {
+        Header(t["today_title"], t["today_sub"], mark = false) {
+            IconButton(onClick = onEnableNotifications) {
+                Icon(
+                    if (notificationsEnabled) Icons.Filled.NotificationsActive else Icons.Filled.NotificationsOff,
+                    t["reminders"], tint = if (notificationsEnabled) c.ink else c.muted,
+                )
+            }
+        }
+    }) {
+        if (!notificationsEnabled) {
+            Surface(
+                onClick = onEnableNotifications,
+                shape = RoundedCornerShape(16.dp), color = c.surface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, c.edge),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
+            ) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.NotificationsOff, null, tint = c.ink2, modifier = Modifier.size(21.dp))
+                    Spacer(Modifier.width(11.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(t["enable_reminders"], color = c.ink, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                        Text(t["enable_reminders_desc"], color = c.muted, fontSize = 12.5.sp)
+                    }
+                    Icon(Icons.Filled.KeyboardArrowLeft, null, tint = c.faint)
+                }
+            }
+        }
+
+        if (due.isNotEmpty()) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp)) {
+                Text(t["due_followups"], color = c.muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                due.forEach { visit -> DueFollowUpRow(visit) { onEdit(visit) } }
+            }
+        }
+
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -858,6 +1134,35 @@ private fun TodayScreen(store: Store) {
             }
         }
         Spacer(Modifier.height(150.dp))
+    }
+}
+
+@Composable
+private fun DueFollowUpRow(visit: Visit, onClick: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val overdue = visit.nextDate < todayIso()
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp), color = c.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, c.edge),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+    ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(38.dp).clip(CircleShape).background(c.sunk), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.NotificationsActive, null, tint = c.ink2, modifier = Modifier.size(19.dp))
+            }
+            Spacer(Modifier.width(11.dp))
+            Column(Modifier.weight(1f)) {
+                Text(visit.client, color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(3.dp))
+                Text(visit.next, color = c.muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Text(
+                if (overdue) t["overdue"] else t["today"],
+                color = if (overdue) c.lost else c.ink2, fontSize = 11.5.sp, fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }
 
@@ -913,7 +1218,7 @@ private fun SettingsScreen(store: Store, onBack: () -> Unit) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 8.dp, end = 22.dp, top = 14.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Filled.Close, t["done"], tint = c.ink) }
-            Text(t["settings"], fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = c.ink)
+            Text(t["settings"], fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink)
         }
 
         GroupCard {
@@ -928,10 +1233,13 @@ private fun SettingsScreen(store: Store, onBack: () -> Unit) {
         GroupCard {
             Text(t["language"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
             Row(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ThemeChip(t["lang_ar"], store.lang == "ar", Modifier.weight(1f)) { store.chooseLang("ar") }
-                ThemeChip(t["lang_en"], store.lang == "en", Modifier.weight(1f)) { store.chooseLang("en") }
+                ThemeChip(t["lang_auto"], store.langMode == "auto", Modifier.weight(1f)) { store.chooseLang("auto") }
+                ThemeChip(t["lang_ar"], store.langMode == "ar", Modifier.weight(1f)) { store.chooseLang("ar") }
+                ThemeChip(t["lang_en"], store.langMode == "en", Modifier.weight(1f)) { store.chooseLang("en") }
             }
         }
+
+        BackupSection(store)
 
         UpdateSection()
 
@@ -954,6 +1262,46 @@ private fun SettingsScreen(store: Store, onBack: () -> Unit) {
             text = { Text(t["delete_all_desc"]) },
             containerColor = c.surface,
         )
+    }
+}
+
+@Composable
+private fun BackupSection(store: Store) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val ctx = LocalContext.current
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            val saved = runCatching {
+                ctx.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(store.exportBackup()) }
+                    ?: error("Unable to open backup destination")
+            }.isSuccess
+            Toast.makeText(ctx, if (saved) t["backup_saved"] else t["backup_failed"], Toast.LENGTH_SHORT).show()
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val restored = runCatching {
+                val raw = ctx.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: error("Unable to read backup")
+                store.restoreBackup(raw)
+            }.getOrDefault(false)
+            Toast.makeText(ctx, if (restored) t["backup_restored"] else t["backup_failed"], Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    GroupCard {
+        Text(t["backup"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp))
+        Text(t["backup_desc"], fontSize = 12.5.sp, color = c.muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        SettingsRow(Icons.Filled.FileUpload, t["export_backup"]) {
+            exportLauncher.launch("sales-visits-${todayIso()}.json")
+        }
+        HorizontalDivider(color = c.edge)
+        SettingsRow(Icons.Filled.FileDownload, t["import_backup"]) {
+            importLauncher.launch(arrayOf("application/json", "text/plain"))
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 package com.sales.visits
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -8,6 +9,33 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+
+val ThmanyahDisplayFont = FontFamily(
+    Font(R.font.thmanyah_serif_display_medium, FontWeight.Medium),
+    Font(R.font.thmanyah_serif_display_bold, FontWeight.Bold),
+    Font(R.font.thmanyah_serif_display_black, FontWeight.Black),
+)
+
+val ThmanyahTextFont = FontFamily(
+    Font(R.font.thmanyah_serif_text_regular, FontWeight.Normal),
+    Font(R.font.thmanyah_serif_text_medium, FontWeight.Medium),
+    Font(R.font.thmanyah_serif_text_bold, FontWeight.Bold),
+)
+
+val GoogleSansFlexFont = FontFamily(
+    Font(R.font.google_sans_flex, FontWeight.Normal),
+    Font(R.font.google_sans_flex, FontWeight.Medium),
+    Font(R.font.google_sans_flex, FontWeight.SemiBold),
+    Font(R.font.google_sans_flex, FontWeight.Bold),
+    Font(R.font.google_sans_flex, FontWeight.ExtraBold),
+)
+
+val LocalAppFont = staticCompositionLocalOf { ThmanyahTextFont }
+val LocalDisplayFont = staticCompositionLocalOf { ThmanyahDisplayFont }
 
 /** Extra brand tokens beyond the Material scheme (monochrome, Easlo-style). */
 data class SalesColors(
@@ -86,9 +114,32 @@ fun Outcome.color(c: SalesColors): Color = when (this) {
     Outcome.NONE -> c.neutral
 }
 
+private fun appTypography(bodyFont: FontFamily, displayFont: FontFamily): Typography {
+    val base = Typography()
+    return Typography(
+        displayLarge = base.displayLarge.copy(fontFamily = displayFont),
+        displayMedium = base.displayMedium.copy(fontFamily = displayFont),
+        displaySmall = base.displaySmall.copy(fontFamily = displayFont),
+        headlineLarge = base.headlineLarge.copy(fontFamily = displayFont),
+        headlineMedium = base.headlineMedium.copy(fontFamily = displayFont),
+        headlineSmall = base.headlineSmall.copy(fontFamily = displayFont),
+        titleLarge = base.titleLarge.copy(fontFamily = displayFont),
+        titleMedium = base.titleMedium.copy(fontFamily = bodyFont),
+        titleSmall = base.titleSmall.copy(fontFamily = bodyFont),
+        bodyLarge = base.bodyLarge.copy(fontFamily = bodyFont),
+        bodyMedium = base.bodyMedium.copy(fontFamily = bodyFont),
+        bodySmall = base.bodySmall.copy(fontFamily = bodyFont),
+        labelLarge = base.labelLarge.copy(fontFamily = bodyFont),
+        labelMedium = base.labelMedium.copy(fontFamily = bodyFont),
+        labelSmall = base.labelSmall.copy(fontFamily = bodyFont),
+    )
+}
+
 @Composable
-fun SalesTheme(dark: Boolean, content: @Composable () -> Unit) {
+fun SalesTheme(dark: Boolean, en: Boolean, content: @Composable () -> Unit) {
     val sales = if (dark) DarkSales else LightSales
+    val bodyFont = if (en) GoogleSansFlexFont else ThmanyahTextFont
+    val displayFont = if (en) GoogleSansFlexFont else ThmanyahDisplayFont
     val scheme = if (dark) darkColorScheme(
         background = sales.bg, surface = sales.surface, onBackground = sales.ink,
         onSurface = sales.ink, primary = sales.ink, onPrimary = sales.onInk,
@@ -96,7 +147,13 @@ fun SalesTheme(dark: Boolean, content: @Composable () -> Unit) {
         background = sales.bg, surface = sales.surface, onBackground = sales.ink,
         onSurface = sales.ink, primary = sales.ink, onPrimary = sales.onInk,
     )
-    CompositionLocalProvider(LocalSales provides sales) {
-        MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
+    CompositionLocalProvider(
+        LocalSales provides sales,
+        LocalAppFont provides bodyFont,
+        LocalDisplayFont provides displayFont,
+    ) {
+        MaterialTheme(colorScheme = scheme, typography = appTypography(bodyFont, displayFont)) {
+            ProvideTextStyle(TextStyle(fontFamily = bodyFont), content = content)
+        }
     }
 }

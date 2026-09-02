@@ -12,15 +12,14 @@ android {
         applicationId = "com.sales.visits"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     signingConfigs {
         create("shared") {
-            // The same ad-hoc keystore the on-phone builds use, so every APK
-            // installs as an update in place and keeps the user's data.
-            storeFile = rootProject.file("../android/debug.keystore")
+            // Stable per-developer key so local updates keep the app data.
+            storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
