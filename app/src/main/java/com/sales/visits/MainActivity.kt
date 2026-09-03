@@ -6,11 +6,13 @@
 package com.sales.visits
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.speech.RecognizerIntent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -29,12 +31,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.rounded.Insights
-import androidx.compose.material.icons.rounded.Map
-import androidx.compose.material.icons.rounded.Storefront
-import androidx.compose.material.icons.rounded.Summarize
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -57,9 +53,11 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
@@ -67,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.haze
@@ -80,9 +79,23 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        check(mapsRouteUri(listOf("First stop", "Last stop"))?.getQueryParameter("waypoints") == "First stop")
         val store = Store(applicationContext)
         setContent { App(store) }
     }
+}
+
+private fun mapsRouteUri(stops: List<String>): Uri? {
+    // ponytail: Maps URLs support nine waypoints; add a Routes API only when larger daily routes are real.
+    val route = stops.filter { it.isNotBlank() }.take(10)
+    val destination = route.lastOrNull() ?: return null
+    return Uri.parse("https://www.google.com/maps/dir/?api=1").buildUpon()
+        .appendQueryParameter("destination", destination)
+        .appendQueryParameter("travelmode", "driving")
+        .apply {
+            if (route.size > 1) appendQueryParameter("waypoints", route.dropLast(1).joinToString("|"))
+        }
+        .build()
 }
 
 private fun uid(): String =
@@ -98,7 +111,13 @@ fun App(store: Store) {
         "light" -> false; "dark" -> true; else -> isSystemInDarkTheme()
     }
     val en = store.lang == "en"
-    SalesTheme(dark, en) {
+    val view = LocalView.current
+    SideEffect {
+        val bars = WindowCompat.getInsetsController((view.context as Activity).window, view)
+        bars.isAppearanceLightStatusBars = !dark
+        bars.isAppearanceLightNavigationBars = !dark
+    }
+    SalesTheme(dark, en, store.palette) {
         val c = LocalSales.current
         CompositionLocalProvider(
             LocalLayoutDirection provides if (en) LayoutDirection.Ltr else LayoutDirection.Rtl,
@@ -191,7 +210,7 @@ private fun Header(title: String, subtitle: String?, mark: Boolean, action: (@Co
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (mark) {
-                    Icon(Icons.Filled.Place, null, tint = c.ink, modifier = Modifier.size(26.dp))
+                    Icon(AppIcons.Place, null, tint = c.ink, modifier = Modifier.size(26.dp))
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(title, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink)
@@ -275,7 +294,7 @@ private fun Fab(onClick: () -> Unit, modifier: Modifier) {
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Filled.Add, "زيارة جديدة", tint = c.onInk, modifier = Modifier.size(26.dp))
+        Icon(AppIcons.Add, "زيارة جديدة", tint = c.onInk, modifier = Modifier.size(26.dp))
     }
 }
 
@@ -285,15 +304,15 @@ private fun NavPill(tab: Int, onTab: (Int) -> Unit, modifier: Modifier) {
     val t = LocalL.current
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(30.dp),
+        shape = CircleShape,
         color = c.navBg,
         shadowElevation = if (c.dark) 0.dp else 10.dp,
     ) {
         Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            NavItem(t["visits"], Icons.Rounded.Storefront, tab == 0) { onTab(0) }
-            NavItem(t["today"], Icons.Rounded.Map, tab == 1) { onTab(1) }
-            NavItem(t["report_tab"], Icons.Rounded.Summarize, tab == 2) { onTab(2) }
-            NavItem(t["insights_tab"], Icons.Rounded.Insights, tab == 3) { onTab(3) }
+            NavItem(t["visits"], AppIcons.Visits, tab == 0) { onTab(0) }
+            NavItem(t["today"], AppIcons.Map, tab == 1) { onTab(1) }
+            NavItem(t["report_tab"], AppIcons.Report, tab == 2) { onTab(2) }
+            NavItem(t["insights_tab"], AppIcons.Insights, tab == 3) { onTab(3) }
         }
     }
 }
@@ -302,18 +321,16 @@ private fun NavPill(tab: Int, onTab: (Int) -> Unit, modifier: Modifier) {
 private fun NavItem(label: String, icon: ImageVector, on: Boolean, onClick: () -> Unit) {
     val c = LocalSales.current
     val fg = if (on) c.navFg else c.navFgDim
-    Column(
+    Box(
         Modifier
-            .clip(RoundedCornerShape(999.dp))
+            .size(48.dp)
+            .clip(CircleShape)
             .background(if (on) c.navActiveBg else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 7.dp)
-            .widthIn(min = 40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .padding(12.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, label, tint = fg, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.height(3.dp))
-        Text(label, fontSize = 11.sp, color = fg, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal)
+        Icon(icon, label, tint = fg, modifier = Modifier.size(24.dp))
     }
 }
 
@@ -349,16 +366,16 @@ private fun VisitsScreen(store: Store, onSettings: () -> Unit, onCustomers: () -
         ) {
             Row {
                 IconButton(onClick = onCustomers) {
-                    Icon(Icons.Filled.PeopleAlt, t["customers"], tint = c.ink)
+                    Icon(AppIcons.People, t["customers"], tint = c.ink)
                 }
                 IconButton(onClick = onSettings) {
-                    Icon(Icons.Filled.Settings, t["settings"], tint = c.ink)
+                    Icon(AppIcons.Settings, t["settings"], tint = c.ink)
                 }
             }
         }
     }) {
         if (visits.isEmpty()) {
-            EmptyState(Icons.Filled.PlaylistAdd, t["empty_visits_title"], t["empty_visits_desc"])
+            EmptyState(AppIcons.Plan, t["empty_visits_title"], t["empty_visits_desc"])
         } else {
             val sorted = visits.sortedByDescending { it.date + it.time }
             val left = sorted.filterIndexed { i, _ -> i % 2 == 0 }
@@ -380,6 +397,15 @@ private fun VisitsScreen(store: Store, onSettings: () -> Unit, onCustomers: () -
 }
 
 @Composable
+private fun ColumnScope.NoteBlock(label: String, text: String) {
+    val c = LocalSales.current
+    Spacer(Modifier.height(10.dp))
+    Text(label, fontSize = 11.sp, color = c.faint, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(2.dp))
+    Text(text, fontSize = 14.sp, color = c.muted, lineHeight = 21.sp, maxLines = 6, overflow = TextOverflow.Ellipsis)
+}
+
+@Composable
 private fun VisitCard(v: Visit, onClick: () -> Unit) {
     val c = LocalSales.current
     Surface(
@@ -394,7 +420,10 @@ private fun VisitCard(v: Visit, onClick: () -> Unit) {
             Text(cardDayShort(v.date), fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(7.dp))
             Text(v.client, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = c.ink, lineHeight = 22.sp)
-            if (v.notes.isNotBlank()) {
+            if (v.notesAr.isNotBlank() || v.notesEn.isNotBlank()) {
+                if (v.notesAr.isNotBlank()) NoteBlock("عربي", v.notesAr)
+                if (v.notesEn.isNotBlank()) NoteBlock("English", v.notesEn)
+            } else if (v.notes.isNotBlank()) {
                 Spacer(Modifier.height(9.dp))
                 Text(v.notes, fontSize = 14.sp, color = c.muted, lineHeight = 21.sp, maxLines = 9, overflow = TextOverflow.Ellipsis)
             }
@@ -421,10 +450,10 @@ private fun CustomersScreen(store: Store, onBack: () -> Unit, onAdd: () -> Unit,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(if (t.en) Icons.Filled.ArrowBackIosNew else Icons.Filled.ArrowForwardIos, t["done"], tint = c.ink)
+                Icon(if (t.en) AppIcons.ArrowBack else AppIcons.ArrowForward, t["done"], tint = c.ink)
             }
             Text(t["customers"], fontSize = 27.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink, modifier = Modifier.weight(1f))
-            IconButton(onClick = onAdd) { Icon(Icons.Filled.PersonAddAlt1, t["add_customer"], tint = c.ink) }
+            IconButton(onClick = onAdd) { Icon(AppIcons.PersonAdd, t["add_customer"], tint = c.ink) }
         }
     }) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -432,7 +461,7 @@ private fun CustomersScreen(store: Store, onBack: () -> Unit, onAdd: () -> Unit,
         }
         if (filtered.isEmpty()) {
             EmptyState(
-                if (query.isBlank()) Icons.Filled.PeopleAlt else Icons.Filled.SearchOff,
+                if (query.isBlank()) AppIcons.People else AppIcons.Search,
                 if (query.isBlank()) t["empty_customers"] else t["no_results"],
                 if (query.isBlank()) t["empty_customers_desc"] else null,
             )
@@ -475,10 +504,17 @@ private fun CustomerRow(customer: Customer, visits: List<Visit>, onClick: () -> 
             }
             if (customer.phone.isNotBlank()) {
                 IconButton(onClick = { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + customer.phone))) }) {
-                    Icon(Icons.Filled.Phone, t["call"], tint = c.ink2, modifier = Modifier.size(20.dp))
+                    Icon(AppIcons.Phone, t["call"], tint = c.ink2, modifier = Modifier.size(20.dp))
                 }
-            } else {
-                Icon(Icons.Filled.KeyboardArrowLeft, null, tint = c.faint)
+            }
+            if (customer.address.isNotBlank()) {
+                IconButton(onClick = {
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW, mapsRouteUri(listOf(customer.address))))
+                }) {
+                    Icon(AppIcons.Directions, t["navigate"], tint = c.ink2, modifier = Modifier.size(20.dp))
+                }
+            } else if (customer.phone.isBlank()) {
+                Icon(AppIcons.ArrowBack, null, tint = c.faint)
             }
         }
     }
@@ -519,7 +555,7 @@ private fun CustomerEditor(store: Store, editing: Customer?, onClose: () -> Unit
             Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CircleBtn(if (t.en) Icons.Filled.ArrowBackIosNew else Icons.Filled.ArrowForwardIos, t["done"]) { done() }
+            CircleBtn(if (t.en) AppIcons.ArrowBack else AppIcons.ArrowForward, t["done"]) { done() }
             Spacer(Modifier.width(12.dp))
             Text(
                 if (editing == null) t["new_customer"] else t["customer_details"],
@@ -527,7 +563,7 @@ private fun CustomerEditor(store: Store, editing: Customer?, onClose: () -> Unit
             )
             if (editing != null) {
                 IconButton(onClick = { confirmDelete = true }) {
-                    Icon(Icons.Filled.DeleteOutline, t["delete_customer"], tint = c.lost)
+                    Icon(AppIcons.Delete, t["delete_customer"], tint = c.lost)
                 }
             }
         }
@@ -544,7 +580,7 @@ private fun CustomerEditor(store: Store, editing: Customer?, onClose: () -> Unit
                             Modifier.height(52.dp).clip(RoundedCornerShape(12.dp)).background(c.ink)
                                 .clickable { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + form.phone.trim()))) }
                                 .padding(horizontal = 16.dp), contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Filled.Phone, t["call"], tint = c.onInk, modifier = Modifier.size(19.dp)) }
+                        ) { Icon(AppIcons.Phone, t["call"], tint = c.onInk, modifier = Modifier.size(19.dp)) }
                     }
                 }
             }
@@ -612,12 +648,15 @@ private class VisitForm(v: Visit?) {
     var type by mutableStateOf(v?.typeEnum() ?: VisitType.FOLLOW)
     var outcome by mutableStateOf(v?.outcomeEnum() ?: Outcome.NONE)
     var notes by mutableStateOf(v?.notes ?: "")
+    var notesAr by mutableStateOf(v?.notesAr ?: "")
+    var notesEn by mutableStateOf(v?.notesEn ?: "")
     var next by mutableStateOf(v?.next ?: "")
     var nextDate by mutableStateOf(v?.nextDate ?: "")
     fun toVisit(id: String) = Visit(
         id = id, client = client.trim(), contact = contact.trim(), phone = phone.trim(),
         address = address.trim(), date = date, time = time, type = type.name, outcome = outcome.name,
-        notes = notes.trim(), next = next.trim(), nextDate = nextDate,
+        notes = notes.trim(), notesAr = notesAr.trim(), notesEn = notesEn.trim(),
+        next = next.trim(), nextDate = nextDate,
     )
 }
 
@@ -657,6 +696,42 @@ private fun VisitEditor(store: Store, editing: Visit?, onClose: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     var showDate by remember { mutableStateOf(false) }
 
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val clip = LocalClipboardManager.current
+    var busy by remember { mutableStateOf(false) }
+    val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull().orEmpty()
+            if (spoken.isNotBlank()) form.notes = (form.notes.trim() + " " + spoken).trim()
+        }
+    }
+    fun startVoice() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (t.en) "en-US" else "ar-EG")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, t["voice_input"])
+        }
+        runCatching { voiceLauncher.launch(intent) }
+            .onFailure { Toast.makeText(ctx, t["ai_failed"], Toast.LENGTH_SHORT).show() }
+    }
+    fun polish() {
+        if (busy) return
+        if (store.apiKey.isBlank()) { Toast.makeText(ctx, t["need_key"], Toast.LENGTH_LONG).show(); return }
+        if (form.notes.isBlank()) return
+        busy = true
+        scope.launch {
+            try {
+                val r = AiFormatter.format(store.apiKey, store.aiModel, form.notes)
+                form.notesAr = r.ar; form.notesEn = r.en
+            } catch (e: Exception) {
+                Toast.makeText(ctx, "${t["ai_failed"]}: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     fun done() {
         if (form.client.isNotBlank()) store.upsert(form.toVisit(editing?.id ?: uid()))
         onClose()
@@ -668,7 +743,7 @@ private fun VisitEditor(store: Store, editing: Visit?, onClose: () -> Unit) {
             Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CircleBtn(if (t.en) Icons.Filled.ArrowBackIosNew else Icons.Filled.ArrowForwardIos, t["done"]) { done() }
+            CircleBtn(if (t.en) AppIcons.ArrowBack else AppIcons.ArrowForward, t["done"]) { done() }
             Spacer(Modifier.width(10.dp))
             Surface(
                 shape = RoundedCornerShape(999.dp),
@@ -680,10 +755,10 @@ private fun VisitEditor(store: Store, editing: Visit?, onClose: () -> Unit) {
                     color = c.ink2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.weight(1f))
-            CircleBtn(Icons.Filled.PersonOutline, t["customer_info"]) { infoOpen = true }
+            CircleBtn(AppIcons.Person, t["customer_info"]) { infoOpen = true }
             Spacer(Modifier.width(8.dp))
             Box {
-                CircleBtn(Icons.Filled.MoreHoriz, t["more"]) { menuOpen = true }
+                CircleBtn(AppIcons.More, t["more"]) { menuOpen = true }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(text = { Text(t["customer_info"]) }, onClick = { menuOpen = false; infoOpen = true })
                     if (editing != null) DropdownMenuItem(
@@ -699,6 +774,53 @@ private fun VisitEditor(store: Store, editing: Visit?, onClose: () -> Unit) {
             EditorField(form.client, { form.client = it }, t["client_name_hint"], 24.sp, FontWeight.ExtraBold, 1)
             Spacer(Modifier.height(10.dp))
             EditorField(form.notes, { form.notes = it }, t["notes_hint"], 16.sp, FontWeight.Normal, 6)
+
+            Spacer(Modifier.height(14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(c.sunk)
+                        .clickable { startVoice() },
+                    contentAlignment = Alignment.Center,
+                ) { Text("🎤", fontSize = 20.sp) }
+                val canPolish = form.notes.isNotBlank() && !busy
+                Box(
+                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
+                        .background(if (canPolish) c.ink else c.sunk)
+                        .clickable(enabled = !busy) { polish() }
+                        .padding(vertical = 15.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (busy) {
+                            CircularProgressIndicator(Modifier.size(16.dp), color = c.onInk, strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(t["polishing"], color = c.onInk, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        } else {
+                            Icon(AppIcons.Report, null, tint = if (canPolish) c.onInk else c.faint, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(t["polish"], color = if (canPolish) c.onInk else c.faint, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                    }
+                }
+            }
+
+            if (form.notesAr.isNotBlank() || form.notesEn.isNotBlank()) {
+                Spacer(Modifier.height(18.dp))
+                Text(t["ai_result"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                if (form.notesAr.isNotBlank()) {
+                    AiVersionCard(t["notes_ar_label"], form.notesAr) {
+                        clip.setText(AnnotatedString(form.notesAr)); Toast.makeText(ctx, t["copied"], Toast.LENGTH_SHORT).show()
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+                if (form.notesEn.isNotBlank()) {
+                    AiVersionCard(t["notes_en_label"], form.notesEn) {
+                        clip.setText(AnnotatedString(form.notesEn)); Toast.makeText(ctx, t["copied"], Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+
             Spacer(Modifier.height(120.dp))
         }
     }
@@ -707,6 +829,24 @@ private fun VisitEditor(store: Store, editing: Visit?, onClose: () -> Unit) {
         onDelete = { editing?.let { store.delete(it.id) }; onClose() },
         onDismiss = { infoOpen = false })
     if (showDate) DatePick(form.date) { form.date = it; showDate = false }
+}
+
+@Composable
+private fun AiVersionCard(label: String, text: String, onCopy: () -> Unit) {
+    val c = LocalSales.current
+    Surface(shape = RoundedCornerShape(14.dp), color = c.sunk, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, fontSize = 12.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Box(
+                    Modifier.clip(RoundedCornerShape(9.dp)).clickable(onClick = onCopy).padding(6.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(AppIcons.Copy, null, tint = c.ink2, modifier = Modifier.size(16.dp)) }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(text, fontSize = 14.sp, color = c.ink, lineHeight = 21.sp)
+        }
+    }
 }
 
 @Composable
@@ -735,7 +875,7 @@ private fun InfoSheet(form: VisitForm, editing: Boolean, onDelete: () -> Unit, o
                             contentAlignment = Alignment.Center,
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Phone, null, tint = c.onInk, modifier = Modifier.size(16.dp))
+                                Icon(AppIcons.Phone, null, tint = c.onInk, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text(t["call"], color = c.onInk, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
@@ -764,7 +904,7 @@ private fun InfoSheet(form: VisitForm, editing: Boolean, onDelete: () -> Unit, o
             if (editing) {
                 Spacer(Modifier.height(8.dp))
                 TextButton(onClick = onDelete, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Filled.DeleteOutline, null, tint = c.lost, modifier = Modifier.size(16.dp))
+                    Icon(AppIcons.Delete, null, tint = c.lost, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(t["delete_visit"], color = c.lost, fontWeight = FontWeight.Bold)
                 }
@@ -919,7 +1059,7 @@ private fun ReportScreen(store: Store) {
             }
         }
         if (vs.isEmpty()) {
-            EmptyState(Icons.Filled.Inbox, t["empty_week"], null)
+            EmptyState(AppIcons.Inbox, t["empty_week"], null)
         } else {
             val maxT = VisitType.values().maxOf { vt -> vs.count { it.typeEnum() == vt } }.coerceAtLeast(1)
             Card {
@@ -943,7 +1083,8 @@ private fun ReportScreen(store: Store) {
                         Spacer(Modifier.width(9.dp))
                         Text(buildString {
                             append(v.client); append(" — "); append(v.typeEnum().label(t.en))
-                            if (v.notes.isNotBlank()) append(" · ${v.notes}")
+                            val note = v.notesFor(t.en)
+                            if (note.isNotBlank()) append(" · $note")
                         }, fontSize = 14.sp, color = c.ink2, lineHeight = 20.sp)
                     }
                 }
@@ -958,7 +1099,7 @@ private fun ReportScreen(store: Store) {
                 contentAlignment = Alignment.Center,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.ContentCopy, null, tint = c.onInk, modifier = Modifier.size(17.dp))
+                    Icon(AppIcons.Copy, null, tint = c.onInk, modifier = Modifier.size(17.dp))
                     Spacer(Modifier.width(8.dp)); Text(t["copy"], color = c.onInk, fontWeight = FontWeight.Bold)
                 }
             }
@@ -974,7 +1115,7 @@ private fun ReportScreen(store: Store) {
                 contentAlignment = Alignment.Center,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Share, null, tint = c.ink, modifier = Modifier.size(17.dp))
+                    Icon(AppIcons.Share, null, tint = c.ink, modifier = Modifier.size(17.dp))
                     Spacer(Modifier.width(8.dp)); Text(t["share"], color = c.ink, fontWeight = FontWeight.Bold)
                 }
             }
@@ -1006,7 +1147,7 @@ private fun InsightsScreen(store: Store) {
     val visits = store.visits
     FrostedScaffold(header = { Header(t["insights_tab"], t["insights_sub"], mark = false) }) {
         if (visits.isEmpty()) {
-            EmptyState(Icons.Filled.BarChart, t["empty_insights"], null)
+            EmptyState(AppIcons.Chart, t["empty_insights"], null)
         } else {
             val byClient = visits.groupingBy { it.client }.eachCount()
             Card {
@@ -1064,13 +1205,17 @@ private fun TodayScreen(
     val t = LocalL.current
     val items = store.todayPlan()
     val due = store.dueFollowUps()
+    val ctx = LocalContext.current
+    val routeStops = items.filterNot { it.done }.map { item ->
+        store.customerFor(item.client)?.address?.ifBlank { item.client } ?: item.client
+    }
     var newClient by remember { mutableStateOf("") }
 
     FrostedScaffold(header = {
         Header(t["today_title"], t["today_sub"], mark = false) {
             IconButton(onClick = onEnableNotifications) {
                 Icon(
-                    if (notificationsEnabled) Icons.Filled.NotificationsActive else Icons.Filled.NotificationsOff,
+                    if (notificationsEnabled) AppIcons.Notifications else AppIcons.NotificationsOff,
                     t["reminders"], tint = if (notificationsEnabled) c.ink else c.muted,
                 )
             }
@@ -1084,13 +1229,13 @@ private fun TodayScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
             ) {
                 Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.NotificationsOff, null, tint = c.ink2, modifier = Modifier.size(21.dp))
+                    Icon(AppIcons.NotificationsOff, null, tint = c.ink2, modifier = Modifier.size(21.dp))
                     Spacer(Modifier.width(11.dp))
                     Column(Modifier.weight(1f)) {
                         Text(t["enable_reminders"], color = c.ink, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
                         Text(t["enable_reminders_desc"], color = c.muted, fontSize = 12.5.sp)
                     }
-                    Icon(Icons.Filled.KeyboardArrowLeft, null, tint = c.faint)
+                    Icon(AppIcons.ArrowBack, null, tint = c.faint)
                 }
             }
         }
@@ -1112,11 +1257,11 @@ private fun TodayScreen(
                 Modifier.size(52.dp).clip(CircleShape).background(c.ink)
                     .clickable { store.addPlan(newClient); newClient = "" },
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Add, t["add_client_hint"], tint = c.onInk, modifier = Modifier.size(24.dp)) }
+            ) { Icon(AppIcons.Add, t["add_client_hint"], tint = c.onInk, modifier = Modifier.size(24.dp)) }
         }
 
         if (items.isEmpty()) {
-            EmptyState(Icons.Rounded.Map, t["empty_today_title"], t["empty_today_desc"])
+            EmptyState(AppIcons.Map, t["empty_today_title"], t["empty_today_desc"])
         } else {
             val done = items.count { it.done }
             Text(
@@ -1124,6 +1269,24 @@ private fun TodayScreen(
                 fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 4.dp, bottom = 6.dp),
             )
+            if (routeStops.isNotEmpty()) {
+                Button(
+                    onClick = {
+                        mapsRouteUri(routeStops)?.let { uri ->
+                            if (routeStops.size > 10) Toast.makeText(ctx, t["route_limit"], Toast.LENGTH_LONG).show()
+                            ctx.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp).height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = c.ink, contentColor = c.onInk),
+                ) {
+                    Icon(AppIcons.Directions, null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(9.dp))
+                    Text("${t["open_route"]} · ${routeStops.size}", fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(4.dp))
+            }
             Column(Modifier.padding(horizontal = 18.dp)) {
                 items.forEachIndexed { i, item ->
                     RoadStop(
@@ -1150,7 +1313,7 @@ private fun DueFollowUpRow(visit: Visit, onClick: () -> Unit) {
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(38.dp).clip(CircleShape).background(c.sunk), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.NotificationsActive, null, tint = c.ink2, modifier = Modifier.size(19.dp))
+                Icon(AppIcons.Notifications, null, tint = c.ink2, modifier = Modifier.size(19.dp))
             }
             Spacer(Modifier.width(11.dp))
             Column(Modifier.weight(1f)) {
@@ -1181,7 +1344,7 @@ private fun RoadStop(index: Int, item: PlanItem, first: Boolean, last: Boolean, 
                     .clickable(onClick = onToggle),
                 contentAlignment = Alignment.Center,
             ) {
-                if (item.done) Icon(Icons.Filled.Check, null, tint = c.onInk, modifier = Modifier.size(17.dp))
+                if (item.done) Icon(AppIcons.Check, null, tint = c.onInk, modifier = Modifier.size(17.dp))
                 else Text("$index", color = c.ink2, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
@@ -1201,7 +1364,7 @@ private fun RoadStop(index: Int, item: PlanItem, first: Boolean, last: Boolean, 
                     textDecoration = if (item.done) TextDecoration.LineThrough else null,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
-                IconButton(onClick = onDelete) { Icon(Icons.Filled.Close, "حذف", tint = c.faint, modifier = Modifier.size(18.dp)) }
+                IconButton(onClick = onDelete) { Icon(AppIcons.Close, "حذف", tint = c.faint, modifier = Modifier.size(18.dp)) }
             }
         }
     }
@@ -1217,7 +1380,7 @@ private fun SettingsScreen(store: Store, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 8.dp, end = 22.dp, top = 14.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Filled.Close, t["done"], tint = c.ink) }
+            IconButton(onClick = onBack) { Icon(AppIcons.Close, t["done"], tint = c.ink) }
             Text(t["settings"], fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink)
         }
 
@@ -1227,6 +1390,12 @@ private fun SettingsScreen(store: Store, onBack: () -> Unit) {
                 ThemeChip(t["theme_auto"], store.theme == "auto", Modifier.weight(1f)) { store.chooseTheme("auto") }
                 ThemeChip(t["theme_light"], store.theme == "light", Modifier.weight(1f)) { store.chooseTheme("light") }
                 ThemeChip(t["theme_dark"], store.theme == "dark", Modifier.weight(1f)) { store.chooseTheme("dark") }
+            }
+            HorizontalDivider(color = c.edge)
+            Text(t["color_style"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
+            Row(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ThemeChip(t["palette_classic"], store.palette == "classic", Modifier.weight(1f)) { store.choosePalette("classic") }
+                ThemeChip(t["palette_warm"], store.palette == "warm", Modifier.weight(1f)) { store.choosePalette("warm") }
             }
         }
 
@@ -1239,16 +1408,18 @@ private fun SettingsScreen(store: Store, onBack: () -> Unit) {
             }
         }
 
+        AiSection(store)
+
         BackupSection(store)
 
         UpdateSection()
 
         GroupCard {
-            SettingsRow(Icons.Filled.DeleteOutline, t["delete_all"], danger = true) { confirmClear = true }
+            SettingsRow(AppIcons.Delete, t["delete_all"], danger = true) { confirmClear = true }
         }
 
         GroupCard {
-            SettingsRow(Icons.Filled.Info, t["about"], value = t["version"]) {}
+            SettingsRow(AppIcons.Info, t["about"], value = t["version"]) {}
         }
         Spacer(Modifier.height(40.dp))
     }
@@ -1262,6 +1433,59 @@ private fun SettingsScreen(store: Store, onBack: () -> Unit) {
             text = { Text(t["delete_all_desc"]) },
             containerColor = c.surface,
         )
+    }
+}
+
+@Composable
+private fun AiSection(store: Store) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var key by remember { mutableStateOf(store.apiKey) }
+    var testing by remember { mutableStateOf(false) }
+
+    GroupCard {
+        Text(t["ai_formatting"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp))
+        Text(t["ai_desc"], fontSize = 12.5.sp, color = c.muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            Text(t["api_key"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 7.dp))
+            TextField(
+                value = key,
+                onValueChange = { key = it; store.chooseApiKey(it) },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text(t["api_key_hint"], color = c.faint) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                shape = RoundedCornerShape(12.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = c.surface, unfocusedContainerColor = c.sunk,
+                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                    focusedTextColor = c.ink, unfocusedTextColor = c.ink, cursorColor = c.ink,
+                ),
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                t["get_key"],
+                fontSize = 12.5.sp, color = c.lead, fontWeight = FontWeight.SemiBold,
+                textDecoration = TextDecoration.Underline,
+                modifier = Modifier.clickable {
+                    runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))) }
+                },
+            )
+        }
+        HorizontalDivider(color = c.edge, modifier = Modifier.padding(top = 14.dp))
+        SettingsRow(AppIcons.Check, if (testing) t["ai_testing"] else t["ai_test"]) {
+            if (testing) return@SettingsRow
+            if (store.apiKey.isBlank()) { Toast.makeText(ctx, t["need_key"], Toast.LENGTH_LONG).show(); return@SettingsRow }
+            testing = true
+            scope.launch {
+                val ok = runCatching { AiFormatter.format(store.apiKey, store.aiModel, "Sample visit note for a connection test.") }.isSuccess
+                testing = false
+                Toast.makeText(ctx, if (ok) t["ai_test_ok"] else t["ai_failed"], Toast.LENGTH_LONG).show()
+            }
+        }
     }
 }
 
@@ -1295,11 +1519,11 @@ private fun BackupSection(store: Store) {
     GroupCard {
         Text(t["backup"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp))
         Text(t["backup_desc"], fontSize = 12.5.sp, color = c.muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-        SettingsRow(Icons.Filled.FileUpload, t["export_backup"]) {
+        SettingsRow(AppIcons.Upload, t["export_backup"]) {
             exportLauncher.launch("sales-visits-${todayIso()}.json")
         }
         HorizontalDivider(color = c.edge)
-        SettingsRow(Icons.Filled.FileDownload, t["import_backup"]) {
+        SettingsRow(AppIcons.Download, t["import_backup"]) {
             importLauncher.launch(arrayOf("application/json", "text/plain"))
         }
     }
@@ -1307,7 +1531,6 @@ private fun BackupSection(store: Store) {
 
 @Composable
 private fun UpdateSection() {
-    val c = LocalSales.current
     val t = LocalL.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1318,7 +1541,7 @@ private fun UpdateSection() {
     GroupCard {
         val label = if (info != null) "${t["install_update"]} (${info!!.versionName})" else t["check_update"]
         val value = status.ifBlank { "v" + AppUpdater.currentVersionName(ctx) }
-        SettingsRow(Icons.Filled.SystemUpdate, label, value = value) {
+        SettingsRow(AppIcons.Update, label, value = value) {
             if (busy) return@SettingsRow
             val i = info
             if (i == null) {
@@ -1370,7 +1593,7 @@ private fun SettingsRow(icon: ImageVector, label: String, value: String? = null,
         Spacer(Modifier.width(12.dp))
         Text(label, color = if (danger) c.lost else c.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         if (value != null) Text(value, color = c.muted, fontSize = 13.sp)
-        else if (!danger) Icon(Icons.Filled.KeyboardArrowLeft, null, tint = c.faint, modifier = Modifier.size(20.dp))
+        else if (!danger) Icon(AppIcons.ArrowBack, null, tint = c.faint, modifier = Modifier.size(20.dp))
     }
 }
 

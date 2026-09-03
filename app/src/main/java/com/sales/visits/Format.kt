@@ -133,7 +133,8 @@ fun reportText(all: List<Visit>, offset: Int): String {
         if (v.contact.isNotBlank()) sb.append(" - ${v.contact}")
         if (v.phone.isNotBlank()) sb.append(" - ${v.phone}")
         sb.append("\n")
-        if (v.notes.isNotBlank()) sb.append("   ${v.notes}\n")
+        val note = v.notesFor(en)
+        if (note.isNotBlank()) sb.append("   $note\n")
         if (v.next.isNotBlank()) {
             sb.append(if (en) "   → Next step: ${v.next}" else "   ← الخطوة الجاية: ${v.next}")
             if (v.nextDate.isNotBlank()) sb.append(" (${fullDay(v.nextDate)})")

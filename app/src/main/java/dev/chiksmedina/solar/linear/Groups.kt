@@ -1,0 +1,16 @@
+package dev.chiksmedina.solar.linear
+
+object ArrowsGroup
+object ArrowsActionGroup
+object BusinessStatisticGroup
+object CallGroup
+object EssentionalUiGroup
+object ListGroup
+object MapLocationGroup
+object MessagesConversationGroup
+object NotesGroup
+object NotificationsGroup
+object SearchGroup
+object SettingsFineTuningGroup
+object ShoppingEcommerceGroup
+object UsersGroup

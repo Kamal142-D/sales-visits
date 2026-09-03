@@ -104,6 +104,50 @@ val DarkSales = SalesColors(
     dark = true,
 )
 
+val WarmLightSales = SalesColors(
+    bg = Color(0xFFF5F1E8),
+    surface = Color(0xFFFFFCF5),
+    sunk = Color(0xFFEAE4D8),
+    ink = Color(0xFF17382B),
+    ink2 = Color(0xFF3D554B),
+    muted = Color(0xFF758078),
+    faint = Color(0xFFA8ADA6),
+    edge = Color(0x1F17382B),
+    onInk = Color(0xFFFFFCF5),
+    ok = Color(0xFF2F6B50),
+    lead = Color(0xFF668173),
+    hold = Color(0xFF8C927C),
+    lost = Color(0xFF52665C),
+    neutral = Color(0xFFB8BDB5),
+    navBg = Color(0xFFFFFCF5),
+    navFg = Color(0xFF17382B),
+    navFgDim = Color(0x8C3D554B),
+    navActiveBg = Color(0x1F2F6B50),
+    dark = false,
+)
+
+val WarmDarkSales = SalesColors(
+    bg = Color(0xFF101510),
+    surface = Color(0xFF192019),
+    sunk = Color(0xFF232B23),
+    ink = Color(0xFFF2EDDF),
+    ink2 = Color(0xFFCAD2C8),
+    muted = Color(0xFF909B91),
+    faint = Color(0xFF5F6A60),
+    edge = Color(0x24F2EDDF),
+    onInk = Color(0xFF102018),
+    ok = Color(0xFF8EC5A5),
+    lead = Color(0xFFA4B4AA),
+    hold = Color(0xFF838F85),
+    lost = Color(0xFFBBC7BD),
+    neutral = Color(0xFF4B574D),
+    navBg = Color(0xF21B231C),
+    navFg = Color(0xFFF2EDDF),
+    navFgDim = Color(0x8CCAD2C8),
+    navActiveBg = Color(0x2E8EC5A5),
+    dark = true,
+)
+
 val LocalSales = staticCompositionLocalOf { LightSales }
 
 fun Outcome.color(c: SalesColors): Color = when (this) {
@@ -136,8 +180,13 @@ private fun appTypography(bodyFont: FontFamily, displayFont: FontFamily): Typogr
 }
 
 @Composable
-fun SalesTheme(dark: Boolean, en: Boolean, content: @Composable () -> Unit) {
-    val sales = if (dark) DarkSales else LightSales
+fun SalesTheme(dark: Boolean, en: Boolean, palette: String, content: @Composable () -> Unit) {
+    val sales = when {
+        palette == "warm" && dark -> WarmDarkSales
+        palette == "warm" -> WarmLightSales
+        dark -> DarkSales
+        else -> LightSales
+    }
     val bodyFont = if (en) GoogleSansFlexFont else ThmanyahTextFont
     val displayFont = if (en) GoogleSansFlexFont else ThmanyahDisplayFont
     val scheme = if (dark) darkColorScheme(

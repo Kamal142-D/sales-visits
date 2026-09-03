@@ -1,6 +1,6 @@
 {
-  "versionCode": 3,
-  "versionName": "1.2",
+  "versionCode": 4,
+  "versionName": "1.3",
   "apkUrl": "https://raw.githubusercontent.com/Kamal142-D/sales-visits/main/app-release.apk",
-  "notes": "إدارة العملاء، تنبيهات المتابعة، النسخ الاحتياطي، خط ثمانية للعربية وGoogle Sans للإنجليزية، واختيار اللغة تلقائياً حسب الجهاز."
+  "notes": "VisitFlow v1.3: مسار يوم متعدد المحطات واتجاهات مباشرة في Google Maps، تنسيق وإملاء ملاحظات الزيارات بالعربية والإنجليزية، ألوان كلاسيكية أو دافئة من الإعدادات، شريط تنقل أبسط، وأيقونات Solar Linear جديدة."
 }

@@ -35,6 +35,8 @@ data class Visit(
     val type: String = "FOLLOW",
     val outcome: String = "NONE",
     val notes: String = "",
+    val notesAr: String = "",   // AI-formatted professional Arabic version
+    val notesEn: String = "",   // AI-formatted professional English version
     val next: String = "",
     val nextDate: String = "",
 )
@@ -72,3 +74,6 @@ data class AppBackup(
 
 fun Visit.typeEnum(): VisitType = runCatching { VisitType.valueOf(type) }.getOrDefault(VisitType.OTHER)
 fun Visit.outcomeEnum(): Outcome = runCatching { Outcome.valueOf(outcome) }.getOrDefault(Outcome.NONE)
+
+/** The note to display: the AI-formatted version for the active language, falling back to the raw note. */
+fun Visit.notesFor(en: Boolean): String = (if (en) notesEn else notesAr).ifBlank { notes }

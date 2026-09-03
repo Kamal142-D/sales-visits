@@ -23,7 +23,17 @@ class Store(context: Context) {
     var theme by mutableStateOf(sp.getString("theme", "auto") ?: "auto")
         private set
 
+    var palette by mutableStateOf(sp.getString("palette", "classic") ?: "classic")
+        private set
+
     var langMode by mutableStateOf(sp.getString("lang", "auto") ?: "auto")
+        private set
+
+    // AI note formatting (bring-your-own-key). Empty key = feature disabled.
+    var apiKey by mutableStateOf(sp.getString("ai_key", "") ?: "")
+        private set
+
+    var aiModel by mutableStateOf(sp.getString("ai_model", "gemini-2.5-flash") ?: "gemini-2.5-flash")
         private set
 
     var lang by mutableStateOf(resolveLanguage(langMode))
@@ -184,6 +194,9 @@ class Store(context: Context) {
         visits.filter { customerKey(it.client) == customerKey(customer.name) }
             .sortedByDescending { it.date + it.time }
 
+    fun customerFor(name: String): Customer? =
+        customers.firstOrNull { customerKey(it.name) == customerKey(name) }
+
     fun dueFollowUps(): List<Visit> = visits
         .filter { it.next.isNotBlank() && it.nextDate.isNotBlank() && it.nextDate <= todayIso() }
         .sortedBy { it.nextDate }
@@ -247,6 +260,21 @@ class Store(context: Context) {
     fun chooseTheme(t: String) {
         theme = t
         sp.edit().putString("theme", t).apply()
+    }
+
+    fun choosePalette(value: String) {
+        palette = value
+        sp.edit().putString("palette", value).apply()
+    }
+
+    fun chooseApiKey(value: String) {
+        apiKey = value.trim()
+        sp.edit().putString("ai_key", apiKey).apply()
+    }
+
+    fun chooseAiModel(value: String) {
+        aiModel = value.trim().ifBlank { "gemini-2.5-flash" }
+        sp.edit().putString("ai_model", aiModel).apply()
     }
 
     fun countThisWeek(): Int = visits.count { inWeek(it.date, 0) }
