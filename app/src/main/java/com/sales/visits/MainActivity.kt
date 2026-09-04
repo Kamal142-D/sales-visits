@@ -22,6 +22,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -1237,8 +1238,11 @@ private fun TodayScreen(
 ) {
     val c = LocalSales.current
     val t = LocalL.current
-    val items = store.todayPlan()
-    val due = store.dueFollowUps()
+    val dates = remember { (0..6).map { java.time.LocalDate.now().plusDays(it.toLong()) } }
+    var selectedDate by remember { mutableStateOf(todayIso()) }
+    val items = store.planFor(selectedDate)
+    val due = if (selectedDate == todayIso()) store.dueFollowUps()
+    else store.visits.filter { it.next.isNotBlank() && it.nextDate == selectedDate }
     val done = items.count { it.done }
     val remaining = items.size - done
     val progress = if (items.isEmpty()) 0f else done.toFloat() / items.size
@@ -1249,7 +1253,7 @@ private fun TodayScreen(
     var newClient by remember { mutableStateOf("") }
 
     FrostedScaffold(header = {
-        Header(t["today_title"], fullDay(todayIso()), mark = false) {
+        Header(if (selectedDate == todayIso()) t["today_title"] else t["today_plan"], fullDay(selectedDate), mark = false) {
             IconButton(onClick = onEnableNotifications) {
                 Icon(
                     if (notificationsEnabled) AppIcons.Notifications else AppIcons.NotificationsOff,
@@ -1258,9 +1262,32 @@ private fun TodayScreen(
             }
         }
     }) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            dates.forEach { date ->
+                val iso = date.toString()
+                val selected = iso == selectedDate
+                Surface(
+                    onClick = { selectedDate = iso },
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (selected) c.ink else c.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) c.ink else c.edge),
+                    modifier = Modifier.width(62.dp).height(72.dp),
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        Text(dayName(date), maxLines = 1, fontSize = 10.sp, color = if (selected) c.onInk else c.muted)
+                        Spacer(Modifier.height(4.dp))
+                        Text(date.dayOfMonth.toString(), fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = if (selected) c.onInk else c.ink)
+                    }
+                }
+            }
+        }
+
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(t["today_progress"], color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(if (selectedDate == todayIso()) t["today_progress"] else t["day_progress"], color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Text("$done / ${items.size}", color = c.ink2, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(12.dp))
@@ -1315,7 +1342,7 @@ private fun TodayScreen(
             Spacer(Modifier.width(8.dp))
             Box(
                 Modifier.size(52.dp).clip(CircleShape).background(c.ink)
-                    .clickable { store.addPlan(newClient); newClient = "" },
+                    .clickable { store.addPlan(newClient, selectedDate); newClient = "" },
                 contentAlignment = Alignment.Center,
             ) { Icon(AppIcons.Add, t["add_client_hint"], tint = c.onInk, modifier = Modifier.size(24.dp)) }
         }
@@ -1328,7 +1355,7 @@ private fun TodayScreen(
                     }
                     Spacer(Modifier.width(12.dp))
                     Column {
-                        Text(t["empty_today_title"], color = c.ink, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                        Text(if (selectedDate == todayIso()) t["empty_today_title"] else t["empty_day_title"], color = c.ink, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(3.dp))
                         Text(t["empty_today_desc"], color = c.muted, fontSize = 12.5.sp)
                     }
@@ -1360,9 +1387,11 @@ private fun TodayScreen(
             }
             Column(Modifier.padding(horizontal = 18.dp)) {
                 items.forEachIndexed { i, item ->
+                    val destination = store.customerFor(item.client)?.address?.ifBlank { item.client } ?: item.client
                     RoadStop(
                         index = i + 1, item = item, first = i == 0, last = i == items.lastIndex,
                         onToggle = { store.togglePlan(item.id) }, onDelete = { store.deletePlan(item.id) },
+                        onNavigate = { mapsRouteUri(listOf(destination))?.let { ctx.startActivity(Intent(Intent.ACTION_VIEW, it)) } },
                     )
                 }
             }
@@ -1401,8 +1430,9 @@ private fun DueFollowUpRow(visit: Visit, onClick: () -> Unit) {
 }
 
 @Composable
-private fun RoadStop(index: Int, item: PlanItem, first: Boolean, last: Boolean, onToggle: () -> Unit, onDelete: () -> Unit) {
+private fun RoadStop(index: Int, item: PlanItem, first: Boolean, last: Boolean, onToggle: () -> Unit, onDelete: () -> Unit, onNavigate: () -> Unit) {
     val c = LocalSales.current
+    val t = LocalL.current
     Row(Modifier.height(IntrinsicSize.Min)) {
         // rail: connecting line + node
         Box(Modifier.width(40.dp).fillMaxHeight()) {
@@ -1435,6 +1465,7 @@ private fun RoadStop(index: Int, item: PlanItem, first: Boolean, last: Boolean, 
                     textDecoration = if (item.done) TextDecoration.LineThrough else null,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
+                IconButton(onClick = onNavigate) { Icon(AppIcons.Directions, t["navigate"], tint = c.ink2, modifier = Modifier.size(19.dp)) }
                 IconButton(onClick = onDelete) { Icon(AppIcons.Close, "حذف", tint = c.faint, modifier = Modifier.size(18.dp)) }
             }
         }

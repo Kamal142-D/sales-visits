@@ -268,11 +268,11 @@ class Store(context: Context) {
     private fun pid(): String =
         System.currentTimeMillis().toString(36) + (1000..9999).random().toString(36)
 
-    fun todayPlan(): List<PlanItem> = plan.filter { it.date == todayIso() }
+    fun planFor(date: String): List<PlanItem> = plan.filter { it.date == date }
 
-    fun addPlan(client: String) {
+    fun addPlan(client: String, date: String = todayIso()) {
         if (client.isBlank()) return
-        plan = plan + PlanItem(pid(), client.trim(), todayIso())
+        plan = plan + PlanItem(pid(), client.trim(), date)
         persistPlan()
     }
 

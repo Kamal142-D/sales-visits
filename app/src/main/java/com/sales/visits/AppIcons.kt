@@ -1,6 +1,8 @@
 package com.sales.visits
 
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import dev.chiksmedina.solar.linear.ArrowsActionGroup
 import dev.chiksmedina.solar.linear.ArrowsGroup
 import dev.chiksmedina.solar.linear.BusinessStatisticGroup
@@ -23,7 +25,6 @@ import dev.chiksmedina.solar.linear.arrowsaction.DownloadMinimalistic
 import dev.chiksmedina.solar.linear.arrowsaction.UploadMinimalistic
 import dev.chiksmedina.solar.linear.businessstatistic.Chart2
 import dev.chiksmedina.solar.linear.call.PhoneRounded
-import dev.chiksmedina.solar.linear.essentionalui.AddCircle
 import dev.chiksmedina.solar.linear.essentionalui.CheckCircle
 import dev.chiksmedina.solar.linear.essentionalui.CloseCircle
 import dev.chiksmedina.solar.linear.essentionalui.Copy
@@ -50,7 +51,7 @@ import dev.chiksmedina.solar.linear.videoaudiosound.Microphone
 
 /** The single Solar Linear style used throughout the app. */
 object AppIcons {
-    val Add: ImageVector get() = EssentionalUiGroup.AddCircle
+    val Add: ImageVector get() = Icons.Filled.Add
     val ArrowBack: ImageVector get() = ArrowsGroup.AltArrowLeft
     val ArrowForward: ImageVector get() = ArrowsGroup.AltArrowRight
     val Chart: ImageVector get() = BusinessStatisticGroup.Chart2
