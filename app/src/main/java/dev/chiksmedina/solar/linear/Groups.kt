@@ -14,3 +14,4 @@ object SearchGroup
 object SettingsFineTuningGroup
 object ShoppingEcommerceGroup
 object UsersGroup
+object VideoAudioSoundGroup

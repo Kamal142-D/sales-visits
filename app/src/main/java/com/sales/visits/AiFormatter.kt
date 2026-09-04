@@ -1,5 +1,6 @@
 package com.sales.visits
 
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -11,43 +12,69 @@ import java.net.URL
 data class FormattedNote(val ar: String, val en: String)
 
 /**
- * Turns a salesperson's raw, informal visit notes into a clean, professional
- * report entry in both Arabic and English, using the user's own Gemini API key
+ * Turns a salesperson's raw visit notes — typed text OR a voice recording — into a clean,
+ * professional report entry in both Arabic and English, using the user's own Gemini API key
  * (bring-your-own-key — the key lives only in this device's settings).
  *
- * Currently backed by Google's Gemini API; kept small and provider-agnostic at the
- * call site so other providers can be added later without touching the callers.
+ * For audio, the recording is sent as-is to Gemini (a multimodal model): it understands the
+ * speech in any language or dialect, then formats and translates it. No on-device transcription.
+ *
+ * Kept small and provider-agnostic at the call site so other providers can be added later.
  */
 object AiFormatter {
     private const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models"
 
-    private const val PROMPT = """You are a professional sales assistant. Reformat the salesperson's raw visit notes into a clear, well-structured, professional visit report entry.
+    private const val PROMPT_TEXT =
+        """You are a professional sales assistant. Reformat the salesperson's raw visit notes into a clear, well-structured, professional visit report entry.
 Rules:
 - Preserve every fact. Do NOT invent, add, or assume any detail that is not present.
 - Fix grammar, spelling, and structure. Keep it concise and business-appropriate.
-- Do not include the customer's name, phone, or address unless they already appear in the notes.
-Produce two versions of the SAME content:
-- "ar": professional Modern Standard Arabic.
-- "en": professional English.
+Produce two versions of the SAME content: "ar" in professional Modern Standard Arabic, "en" in professional English.
 
 Raw visit notes:
 """
+
+    private const val PROMPT_AUDIO =
+        """You are a professional sales assistant. The attached audio is a salesperson describing a sales visit, spoken in any language or dialect (often Egyptian Arabic).
+Listen to it, understand the content, then write a clear, well-structured, professional visit report entry.
+Rules:
+- Preserve every fact you hear. Do NOT invent, add, or assume any detail that was not said.
+- Fix grammar and structure. Keep it concise and business-appropriate.
+Produce two versions of the SAME content: "ar" in professional Modern Standard Arabic, "en" in professional English."""
 
     /**
      * @throws IllegalArgumentException when the key or text is blank
      * @throws Exception on network/HTTP/parse failure (message is safe to surface)
      */
-    suspend fun format(apiKey: String, model: String, rawText: String): FormattedNote =
+    suspend fun format(apiKey: String, model: String, rawText: String): FormattedNote {
+        require(rawText.isNotBlank()) { "empty_text" }
+        val parts = JSONArray().put(JSONObject().put("text", PROMPT_TEXT + rawText.trim()))
+        return request(apiKey, model, parts)
+    }
+
+    /**
+     * Sends a voice recording for the model to understand and format directly.
+     * @throws IllegalArgumentException when the key is blank or audio is empty
+     * @throws Exception on network/HTTP/parse failure
+     */
+    suspend fun formatAudio(apiKey: String, model: String, audio: ByteArray, mimeType: String): FormattedNote {
+        require(audio.isNotEmpty()) { "empty_audio" }
+        val parts = JSONArray()
+            .put(JSONObject().put("text", PROMPT_AUDIO))
+            .put(JSONObject().put("inline_data", JSONObject().apply {
+                put("mime_type", mimeType)
+                put("data", Base64.encodeToString(audio, Base64.NO_WRAP))
+            }))
+        return request(apiKey, model, parts)
+    }
+
+    private suspend fun request(apiKey: String, model: String, parts: JSONArray): FormattedNote =
         withContext(Dispatchers.IO) {
             val key = apiKey.trim()
-            val text = rawText.trim()
             require(key.isNotBlank()) { "missing_key" }
-            require(text.isNotBlank()) { "empty_text" }
 
             val body = JSONObject().apply {
-                put("contents", JSONArray().put(JSONObject().apply {
-                    put("parts", JSONArray().put(JSONObject().put("text", PROMPT + text)))
-                }))
+                put("contents", JSONArray().put(JSONObject().put("parts", parts)))
                 put("generationConfig", JSONObject().apply {
                     put("temperature", 0.3)
                     put("responseMimeType", "application/json")
@@ -66,16 +93,15 @@ Raw visit notes:
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 20000
-                readTimeout = 60000
+                readTimeout = 90000
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
             }
             try {
                 conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 if (conn.responseCode !in 200..299) {
-                    val err = runCatching {
-                        conn.errorStream?.bufferedReader()?.use { it.readText() }
-                    }.getOrNull().orEmpty()
+                    val err = runCatching { conn.errorStream?.bufferedReader()?.use { it.readText() } }
+                        .getOrNull().orEmpty()
                     throw Exception(geminiError(err, conn.responseCode))
                 }
                 val root = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
@@ -85,10 +111,7 @@ Raw visit notes:
                     ?.optString("text").orEmpty()
                 if (jsonText.isBlank()) throw Exception("empty_response")
                 val parsed = JSONObject(jsonText)
-                FormattedNote(
-                    ar = parsed.optString("ar").trim(),
-                    en = parsed.optString("en").trim(),
-                )
+                FormattedNote(ar = parsed.optString("ar").trim(), en = parsed.optString("en").trim())
             } finally {
                 conn.disconnect()
             }

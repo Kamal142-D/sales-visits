@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "263896178023",
+    "project_id": "visitflow-3f533",
+    "storage_bucket": "visitflow-3f533.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:263896178023:android:6aa5a7965be7ab48a8a3c2",
+        "android_client_info": {
+          "package_name": "com.visit.flow"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC1xUcH_gz9hAV3Qbsumnt0-ErYFsqAsaM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

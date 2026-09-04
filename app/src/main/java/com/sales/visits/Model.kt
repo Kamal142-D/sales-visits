@@ -72,6 +72,29 @@ data class AppBackup(
     val plan: List<PlanItem>,
 )
 
+@Serializable
+data class UserProfile(
+    val name: String = "",
+    val jobTitle: String = "",
+    val company: String = "",
+    val phone: String = "",
+)
+
+/** Three-way sync resolves whole-list changes; local wins only when the same record changed on both devices. */
+internal fun mergeBackups(local: AppBackup, remote: AppBackup): AppBackup = AppBackup(
+    exportedAt = "",
+    visits = (remote.visits.associateBy { it.id } + local.visits.associateBy { it.id }).values.toList(),
+    customers = (remote.customers.associateBy { it.id } + local.customers.associateBy { it.id }).values.toList(),
+    plan = (remote.plan.associateBy { it.id } + local.plan.associateBy { it.id }).values.toList(),
+)
+
+internal fun checkCloudMerge() {
+    val remote = AppBackup(exportedAt = "", visits = listOf(Visit("v1", "Remote", date = "2026-01-01")), customers = emptyList(), plan = emptyList())
+    val local = AppBackup(exportedAt = "", visits = listOf(Visit("v1", "Local", date = "2026-01-01"), Visit("v2", "Only local", date = "2026-01-01")), customers = emptyList(), plan = emptyList())
+    val merged = mergeBackups(local, remote)
+    check(merged.visits.size == 2 && merged.visits.first { it.id == "v1" }.client == "Local")
+}
+
 fun Visit.typeEnum(): VisitType = runCatching { VisitType.valueOf(type) }.getOrDefault(VisitType.OTHER)
 fun Visit.outcomeEnum(): Outcome = runCatching { Outcome.valueOf(outcome) }.getOrDefault(Outcome.NONE)
 

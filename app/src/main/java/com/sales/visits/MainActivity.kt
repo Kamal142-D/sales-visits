@@ -12,7 +12,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.speech.RecognizerIntent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -66,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import com.google.firebase.FirebaseApp
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.haze
@@ -80,6 +80,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         check(mapsRouteUri(listOf("First stop", "Last stop"))?.getQueryParameter("waypoints") == "First stop")
+        checkCloudMerge()
         val store = Store(applicationContext)
         setContent { App(store) }
     }
@@ -124,12 +125,15 @@ fun App(store: Store) {
             LocalL provides if (en) EN else AR,
         ) {
             val ctx = LocalContext.current
+            val cloud = remember { FirebaseApp.initializeApp(ctx)?.let { CloudAccount(ctx, store) } }
+            DisposableEffect(cloud) { onDispose { cloud?.close() } }
             var notificationGranted by remember { mutableStateOf(ReminderScheduler.notificationsEnabled(ctx)) }
             val notificationPermission = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
             ) { granted -> notificationGranted = granted }
             var tab by remember { mutableStateOf(0) }
             var showSettings by remember { mutableStateOf(false) }
+            var showProfileEditor by remember { mutableStateOf(false) }
             var showCustomers by remember { mutableStateOf(false) }
             var customerEditorOpen by remember { mutableStateOf(false) }
             var editingCustomer by remember { mutableStateOf<Customer?>(null) }
@@ -138,6 +142,7 @@ fun App(store: Store) {
 
             Box(Modifier.fillMaxSize().background(c.bg)) {
                 when {
+                    showProfileEditor && cloud != null -> ProfileEditorScreen(cloud) { showProfileEditor = false }
                     editorOpen -> VisitEditor(store, editing) { editorOpen = false }
                     customerEditorOpen -> CustomerEditor(store, editingCustomer) { customerEditorOpen = false }
                     showCustomers -> CustomersScreen(
@@ -164,10 +169,16 @@ fun App(store: Store) {
                         onEdit = { editing = it; editorOpen = true },
                     )
                     tab == 2 -> ReportScreen(store)
-                    else -> InsightsScreen(store)
+                    tab == 3 -> InsightsScreen(store)
+                    else -> ProfileScreen(
+                        store = store,
+                        account = cloud,
+                        onSettings = { showSettings = true },
+                        onEdit = { showProfileEditor = true },
+                    )
                 }
 
-                if (!showSettings && !editorOpen && !showCustomers && !customerEditorOpen) {
+                if (!showSettings && !showProfileEditor && !editorOpen && !showCustomers && !customerEditorOpen) {
                     if (tab == 0) {
                         Fab(
                             onClick = { editing = null; editorOpen = true },
@@ -313,6 +324,7 @@ private fun NavPill(tab: Int, onTab: (Int) -> Unit, modifier: Modifier) {
             NavItem(t["today"], AppIcons.Map, tab == 1) { onTab(1) }
             NavItem(t["report_tab"], AppIcons.Report, tab == 2) { onTab(2) }
             NavItem(t["insights_tab"], AppIcons.Insights, tab == 3) { onTab(3) }
+            NavItem(t["profile"], AppIcons.Person, tab == 4) { onTab(4) }
         }
     }
 }
@@ -609,11 +621,21 @@ private fun CustomerEditor(store: Store, editing: Customer?, onClose: () -> Unit
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     OutcomeDot(visit.outcomeEnum())
                                     Spacer(Modifier.width(8.dp))
-                                    Text(fullDay(visit.date), color = c.ink2, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "${visit.typeEnum().label(t.en)} · ${visit.outcomeEnum().label(t.en)}",
+                                        color = c.ink, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(fullDay(visit.date), color = c.muted, fontSize = 12.sp)
                                 }
-                                if (visit.notes.isNotBlank()) {
+                                val note = visit.notesFor(t.en)
+                                if (note.isNotBlank()) {
                                     Spacer(Modifier.height(6.dp))
-                                    Text(visit.notes, color = c.muted, fontSize = 13.5.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                    Text(note, color = c.muted, fontSize = 13.5.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                }
+                                if (visit.next.isNotBlank()) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Text("${t["next_step"]}: ${visit.next}", color = c.ink2, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
@@ -698,47 +720,67 @@ private fun VisitEditor(store: Store, editing: Visit?, onClose: () -> Unit) {
 
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val clip = LocalClipboardManager.current
-    var busy by remember { mutableStateOf(false) }
-    val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull().orEmpty()
-            if (spoken.isNotBlank()) form.notes = (form.notes.trim() + " " + spoken).trim()
+    val recorder = remember { VoiceRecorder(ctx) }
+    // 0 = idle, 1 = recording, 2 = sending the recording to the AI
+    var recState by remember { mutableStateOf(0) }
+    DisposableEffect(Unit) { onDispose { recorder.cancel() } }
+
+    fun processRecording(file: java.io.File) {
+        if (store.apiKey.isBlank()) {
+            recState = 0; file.delete()
+            Toast.makeText(ctx, t["need_key"], Toast.LENGTH_LONG).show(); return
         }
-    }
-    fun startVoice() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (t.en) "en-US" else "ar-EG")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, t["voice_input"])
-        }
-        runCatching { voiceLauncher.launch(intent) }
-            .onFailure { Toast.makeText(ctx, t["ai_failed"], Toast.LENGTH_SHORT).show() }
-    }
-    fun polish() {
-        if (busy) return
-        if (store.apiKey.isBlank()) { Toast.makeText(ctx, t["need_key"], Toast.LENGTH_LONG).show(); return }
-        if (form.notes.isBlank()) return
-        busy = true
+        recState = 2
         scope.launch {
             try {
-                val r = AiFormatter.format(store.apiKey, store.aiModel, form.notes)
+                val r = AiFormatter.formatAudio(store.apiKey, store.aiModel, file.readBytes(), "audio/aac")
                 form.notesAr = r.ar; form.notesEn = r.en
             } catch (e: Exception) {
                 Toast.makeText(ctx, "${t["ai_failed"]}: ${e.message}", Toast.LENGTH_LONG).show()
             } finally {
-                busy = false
+                recState = 0; file.delete()
             }
+        }
+    }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            if (recorder.start()) recState = 1 else Toast.makeText(ctx, t["ai_failed"], Toast.LENGTH_SHORT).show()
+        } else Toast.makeText(ctx, t["mic_denied"], Toast.LENGTH_LONG).show()
+    }
+    fun onMic() {
+        when (recState) {
+            1 -> {
+                val f = recorder.stop()
+                recState = 0
+                if (f != null) processRecording(f)
+                else Toast.makeText(ctx, t["rec_failed"], Toast.LENGTH_SHORT).show()
+            }
+            0 -> if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                if (recorder.start()) recState = 1 else Toast.makeText(ctx, t["ai_failed"], Toast.LENGTH_SHORT).show()
+            } else micPermission.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
     fun done() {
-        if (form.client.isNotBlank()) store.upsert(form.toVisit(editing?.id ?: uid()))
+        if (form.client.isNotBlank()) {
+            val id = editing?.id ?: uid()
+            val raw = form.notes.trim()
+            val changed = raw != (editing?.notes ?: "").trim()
+            // Re-format from scratch when the raw note changed, so stale versions never linger.
+            var visit = form.toVisit(id)
+            if (changed) visit = visit.copy(notesAr = "", notesEn = "")
+            store.upsert(visit)
+            // AI formats the note into both languages automatically (needs a key).
+            if (raw.isNotBlank() && store.apiKey.isNotBlank() &&
+                (changed || (visit.notesAr.isBlank() && visit.notesEn.isBlank()))
+            ) store.autoFormat(id, raw)
+        }
         onClose()
     }
     BackHandler { done() }
 
-    Column(Modifier.fillMaxSize().background(c.bg)) {
+    Box(Modifier.fillMaxSize().background(c.bg)) {
+    Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -775,53 +817,63 @@ private fun VisitEditor(store: Store, editing: Visit?, onClose: () -> Unit) {
             Spacer(Modifier.height(10.dp))
             EditorField(form.notes, { form.notes = it }, t["notes_hint"], 16.sp, FontWeight.Normal, 6)
 
-            Spacer(Modifier.height(14.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(
-                    Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(c.sunk)
-                        .clickable { startVoice() },
-                    contentAlignment = Alignment.Center,
-                ) { Text("🎤", fontSize = 20.sp) }
-                val canPolish = form.notes.isNotBlank() && !busy
-                Box(
-                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
-                        .background(if (canPolish) c.ink else c.sunk)
-                        .clickable(enabled = !busy) { polish() }
-                        .padding(vertical = 15.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (busy) {
-                            CircularProgressIndicator(Modifier.size(16.dp), color = c.onInk, strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text(t["polishing"], color = c.onInk, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        } else {
-                            Icon(AppIcons.Report, null, tint = if (canPolish) c.onInk else c.faint, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(t["polish"], color = if (canPolish) c.onInk else c.faint, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                    }
+            if (recState == 2) {
+                Spacer(Modifier.height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), color = c.ink, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(t["polishing"], fontSize = 13.sp, color = c.muted)
                 }
             }
-
             if (form.notesAr.isNotBlank() || form.notesEn.isNotBlank()) {
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(16.dp))
                 Text(t["ai_result"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                if (form.notesAr.isNotBlank()) {
-                    AiVersionCard(t["notes_ar_label"], form.notesAr) {
-                        clip.setText(AnnotatedString(form.notesAr)); Toast.makeText(ctx, t["copied"], Toast.LENGTH_SHORT).show()
-                    }
-                    Spacer(Modifier.height(10.dp))
-                }
-                if (form.notesEn.isNotBlank()) {
-                    AiVersionCard(t["notes_en_label"], form.notesEn) {
-                        clip.setText(AnnotatedString(form.notesEn)); Toast.makeText(ctx, t["copied"], Toast.LENGTH_SHORT).show()
-                    }
-                }
+                // Same plain, in-place writing style as the note field, so you can just edit the text.
+                Spacer(Modifier.height(12.dp))
+                Text("عربي", fontSize = 11.sp, color = c.faint, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                EditorField(form.notesAr, { form.notesAr = it }, "", 16.sp, FontWeight.Normal, 2)
+                Spacer(Modifier.height(14.dp))
+                Text("English", fontSize = 11.sp, color = c.faint, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                EditorField(form.notesEn, { form.notesEn = it }, "", 16.sp, FontWeight.Normal, 2)
             }
 
+            Spacer(Modifier.height(18.dp))
+            Text(t["quick_result"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Outcome.values().filterNot { it == Outcome.NONE }.forEach { outcome ->
+                    ChoiceChip(outcome.label(t.en), form.outcome == outcome, outcome.color(c)) { form.outcome = outcome }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Text(t["quick_next"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(t["template_quote"], t["template_call"], t["template_follow"]).forEach { template ->
+                    ChoiceChip(template, form.next == template) { form.next = if (form.next == template) "" else template }
+                }
+            }
             Spacer(Modifier.height(120.dp))
+        }
+    }
+        // Voice recording — same circular style as the add-visit FAB; sits bottom-end,
+        // which resolves to the right in English (LTR) and the left in Arabic (RTL).
+        // Tap to record, tap again to stop and send the audio to the AI.
+        Box(
+            Modifier.align(Alignment.BottomEnd).navigationBarsPadding()
+                .padding(end = 22.dp, bottom = 26.dp)
+                .size(56.dp).clip(CircleShape)
+                .background(if (recState == 1) c.lost else c.ink)
+                .clickable(enabled = recState != 2) { onMic() },
+            contentAlignment = Alignment.Center,
+        ) {
+            when (recState) {
+                2 -> CircularProgressIndicator(Modifier.size(24.dp), color = c.onInk, strokeWidth = 2.dp)
+                1 -> Box(Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)).background(c.onInk))
+                else -> Icon(AppIcons.Mic, t["voice_input"], tint = c.onInk, modifier = Modifier.size(26.dp))
+            }
         }
     }
 
@@ -829,24 +881,6 @@ private fun VisitEditor(store: Store, editing: Visit?, onClose: () -> Unit) {
         onDelete = { editing?.let { store.delete(it.id) }; onClose() },
         onDismiss = { infoOpen = false })
     if (showDate) DatePick(form.date) { form.date = it; showDate = false }
-}
-
-@Composable
-private fun AiVersionCard(label: String, text: String, onCopy: () -> Unit) {
-    val c = LocalSales.current
-    Surface(shape = RoundedCornerShape(14.dp), color = c.sunk, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(label, fontSize = 12.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                Box(
-                    Modifier.clip(RoundedCornerShape(9.dp)).clickable(onClick = onCopy).padding(6.dp),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(AppIcons.Copy, null, tint = c.ink2, modifier = Modifier.size(16.dp)) }
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(text, fontSize = 14.sp, color = c.ink, lineHeight = 21.sp)
-        }
-    }
 }
 
 @Composable
@@ -922,7 +956,7 @@ private fun ChoiceChip(text: String, selected: Boolean, selColor: Color? = null,
     val bg = if (selected) (selColor ?: c.ink) else c.sunk
     // contrast the label against the actual chip colour (fixes white-on-light in dark mode)
     val fg = if (selected) (if (bg.luminance() > 0.5f) Color(0xFF0B0B0B) else Color.White) else c.ink2
-    Surface(shape = RoundedCornerShape(11.dp), color = bg, onClick = onClick) {
+    Surface(shape = RoundedCornerShape(11.dp), color = bg, onClick = onClick, modifier = Modifier.heightIn(min = 44.dp)) {
         Text(text, Modifier.padding(horizontal = 15.dp, vertical = 10.dp), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fg)
     }
 }
@@ -1205,6 +1239,9 @@ private fun TodayScreen(
     val t = LocalL.current
     val items = store.todayPlan()
     val due = store.dueFollowUps()
+    val done = items.count { it.done }
+    val remaining = items.size - done
+    val progress = if (items.isEmpty()) 0f else done.toFloat() / items.size
     val ctx = LocalContext.current
     val routeStops = items.filterNot { it.done }.map { item ->
         store.customerFor(item.client)?.address?.ifBlank { item.client } ?: item.client
@@ -1212,7 +1249,7 @@ private fun TodayScreen(
     var newClient by remember { mutableStateOf("") }
 
     FrostedScaffold(header = {
-        Header(t["today_title"], t["today_sub"], mark = false) {
+        Header(t["today_title"], fullDay(todayIso()), mark = false) {
             IconButton(onClick = onEnableNotifications) {
                 Icon(
                     if (notificationsEnabled) AppIcons.Notifications else AppIcons.NotificationsOff,
@@ -1221,6 +1258,25 @@ private fun TodayScreen(
             }
         }
     }) {
+        Card {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(t["today_progress"], color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("$done / ${items.size}", color = c.ink2, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(12.dp))
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(99.dp)),
+                color = c.ink, trackColor = c.sunk,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Stat(done.toString(), t["completed"])
+                Stat(remaining.toString(), t["remaining"])
+                Stat(due.size.toString(), t["followups_short"])
+            }
+        }
+
         if (!notificationsEnabled) {
             Surface(
                 onClick = onEnableNotifications,
@@ -1247,6 +1303,10 @@ private fun TodayScreen(
             }
         }
 
+        Text(
+            t["today_plan"], color = c.muted, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 10.dp, bottom = 2.dp),
+        )
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1261,9 +1321,20 @@ private fun TodayScreen(
         }
 
         if (items.isEmpty()) {
-            EmptyState(AppIcons.Map, t["empty_today_title"], t["empty_today_desc"])
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(46.dp).clip(CircleShape).background(c.sunk), contentAlignment = Alignment.Center) {
+                        Icon(AppIcons.Map, null, tint = c.muted, modifier = Modifier.size(23.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(t["empty_today_title"], color = c.ink, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(3.dp))
+                        Text(t["empty_today_desc"], color = c.muted, fontSize = 12.5.sp)
+                    }
+                }
+            }
         } else {
-            val done = items.count { it.done }
             Text(
                 "$done / ${items.size} ${t["stops_done"]}",
                 fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold,
@@ -1368,6 +1439,213 @@ private fun RoadStop(index: Int, item: PlanItem, first: Boolean, last: Boolean, 
             }
         }
     }
+}
+
+/* ---------------- account + profile ---------------- */
+
+@Composable
+private fun ProfileScreen(store: Store, account: CloudAccount?, onSettings: () -> Unit, onEdit: () -> Unit) {
+    val t = LocalL.current
+    FrostedScaffold(header = { Header(t["profile"], t["profile_sub"], mark = false) }) {
+        if (account == null) {
+            GroupCard {
+                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(AppIcons.Person, null, tint = LocalSales.current.faint, modifier = Modifier.size(46.dp))
+                    Spacer(Modifier.height(12.dp))
+                    Text(t["firebase_pending"], color = LocalSales.current.ink, fontWeight = FontWeight.Bold)
+                }
+            }
+        } else if (account.user == null) {
+            SignInCard(account)
+        } else {
+            SignedInProfile(store, account, onSettings, onEdit)
+        }
+        Spacer(Modifier.height(118.dp))
+    }
+}
+
+@Composable
+private fun SignInCard(account: CloudAccount) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    var creating by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+
+    GroupCard {
+        Column(Modifier.padding(20.dp)) {
+            Text(
+                if (creating) t["create_account"] else t["sign_in"],
+                color = c.ink, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold,
+                fontFamily = LocalDisplayFont.current,
+            )
+            Spacer(Modifier.height(5.dp))
+            Text(t["account_desc"], color = c.muted, fontSize = 13.5.sp)
+            Spacer(Modifier.height(20.dp))
+            if (creating) {
+                AccountField(t["full_name"], name, { name = it }, KeyboardType.Text)
+                Spacer(Modifier.height(10.dp))
+            }
+            AccountField(t["email"], email, { email = it }, KeyboardType.Email)
+            Spacer(Modifier.height(10.dp))
+            AccountField(t["password"], password, { password = it }, KeyboardType.Password, password = true)
+            val message = accountMessage(account.errorCode, t)
+            if (message.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Text(message, color = if (account.errorCode == "reset_sent") c.ok else c.lost, fontSize = 13.sp)
+            }
+            Spacer(Modifier.height(16.dp))
+            Surface(
+                onClick = {
+                    if (creating) account.createAccount(name, email, password)
+                    else account.signIn(email, password)
+                },
+                enabled = !account.busy,
+                color = c.ink, shape = RoundedCornerShape(13.dp), modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    if (account.busy) CircularProgressIndicator(Modifier.size(20.dp), color = c.onInk, strokeWidth = 2.dp)
+                    else Text(if (creating) t["create_account"] else t["sign_in"], color = c.onInk, fontWeight = FontWeight.Bold)
+                }
+            }
+            if (!creating) {
+                TextButton(onClick = { account.resetPassword(email) }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                    Text(t["forgot_password"], color = c.muted)
+                }
+            }
+            TextButton(
+                onClick = { creating = !creating },
+                modifier = Modifier.align(Alignment.CenterHorizontally).heightIn(min = 48.dp),
+            ) {
+                Text(if (creating) t["have_account"] else t["need_account"], color = c.ink, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountField(label: String, value: String, onChange: (String) -> Unit, keyboard: KeyboardType, password: Boolean = false) {
+    val c = LocalSales.current
+    TextField(
+        value = value, onValueChange = onChange, modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) }, singleLine = true,
+        visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+        shape = RoundedCornerShape(12.dp),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = c.sunk, unfocusedContainerColor = c.sunk,
+            focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+            focusedTextColor = c.ink, unfocusedTextColor = c.ink, cursorColor = c.ink,
+            focusedLabelColor = c.muted, unfocusedLabelColor = c.muted,
+        ),
+    )
+}
+
+@Composable
+private fun SignedInProfile(store: Store, account: CloudAccount, onSettings: () -> Unit, onEdit: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val profile = account.profile
+    val email = account.user?.email.orEmpty()
+    val name = profile.name.ifBlank { email.substringBefore('@') }
+    val role = listOf(profile.jobTitle, profile.company).filter { it.isNotBlank() }.joinToString(" · ")
+    val success = store.visits.count { it.outcomeEnum() == Outcome.SUCCESS }
+
+    GroupCard {
+        Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(72.dp).clip(CircleShape).background(c.ink), contentAlignment = Alignment.Center) {
+                Text(profileInitials(name), color = c.onInk, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(name, color = c.ink, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current)
+            if (role.isNotBlank()) Text(role, color = c.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 3.dp))
+            Text(email, color = c.muted, fontSize = 12.5.sp, modifier = Modifier.padding(top = 3.dp))
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Stat(store.visits.size.toString(), t["stat_visits"])
+                Stat(store.customers.size.toString(), t["stat_clients"])
+                Stat(success.toString(), t["stat_success"])
+            }
+        }
+    }
+
+    GroupCard {
+        SettingsRow(AppIcons.Person, t["edit_profile"]) { onEdit() }
+        HorizontalDivider(color = c.edge)
+        SettingsRow(AppIcons.Update, t["cloud_sync"], value = t["sync_${account.syncState}"]) {}
+        HorizontalDivider(color = c.edge)
+        SettingsRow(AppIcons.Settings, t["settings"]) { onSettings() }
+    }
+
+    GroupCard {
+        Text(t["appearance"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
+        Row(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ThemeChip(t["theme_auto"], store.theme == "auto", Modifier.weight(1f)) { store.chooseTheme("auto") }
+            ThemeChip(t["theme_light"], store.theme == "light", Modifier.weight(1f)) { store.chooseTheme("light") }
+            ThemeChip(t["theme_dark"], store.theme == "dark", Modifier.weight(1f)) { store.chooseTheme("dark") }
+        }
+        HorizontalDivider(color = c.edge)
+        Text(t["language"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
+        Row(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ThemeChip(t["lang_auto"], store.langMode == "auto", Modifier.weight(1f)) { store.chooseLang("auto") }
+            ThemeChip(t["lang_ar"], store.langMode == "ar", Modifier.weight(1f)) { store.chooseLang("ar") }
+            ThemeChip(t["lang_en"], store.langMode == "en", Modifier.weight(1f)) { store.chooseLang("en") }
+        }
+    }
+
+    GroupCard { SettingsRow(AppIcons.ArrowBack, t["sign_out"], danger = true) { account.signOut() } }
+}
+
+@Composable
+private fun ProfileEditorScreen(account: CloudAccount, onBack: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val original = account.profile
+    var name by remember(original) { mutableStateOf(original.name) }
+    var job by remember(original) { mutableStateOf(original.jobTitle) }
+    var company by remember(original) { mutableStateOf(original.company) }
+    var phone by remember(original) { mutableStateOf(original.phone) }
+    BackHandler(onBack = onBack)
+    Column(Modifier.fillMaxSize().background(c.bg)) {
+        Row(
+            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) { Icon(if (t.en) AppIcons.ArrowBack else AppIcons.ArrowForward, t["cancel"], tint = c.ink) }
+            Text(t["edit_profile"], color = c.ink, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, modifier = Modifier.weight(1f))
+            TextButton(onClick = {
+                if (name.isNotBlank()) {
+                    account.saveProfile(UserProfile(name, job, company, phone))
+                    onBack()
+                }
+            }) { Text(t["done"], color = c.ink, fontWeight = FontWeight.Bold) }
+        }
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+            Spacer(Modifier.height(12.dp))
+            Field(t["full_name"], name, { name = it }, t["full_name"])
+            Field(t["job_title"], job, { job = it }, t["job_title_hint"])
+            Field(t["company"], company, { company = it }, t["company_hint"])
+            LabeledBlock(t["phone"]) { Input(phone, { phone = it }, t["phone_hint"], kb = KeyboardType.Phone) }
+            Spacer(Modifier.height(40.dp))
+        }
+    }
+}
+
+private fun profileInitials(name: String): String = name.trim().split(Regex("\\s+"))
+    .filter { it.isNotBlank() }.take(2).joinToString("") { it.take(1).uppercase() }.ifBlank { "V" }
+
+private fun accountMessage(code: String?, t: L): String = when (code) {
+    "name" -> t["error_name"]
+    "email" -> t["error_email"]
+    "password" -> t["error_password"]
+    "credentials" -> t["error_credentials"]
+    "email_used" -> t["error_email_used"]
+    "network" -> t["error_network"]
+    "too_many" -> t["error_too_many"]
+    "reset_sent" -> t["reset_sent"]
+    "auth_failed" -> t["error_auth"]
+    else -> ""
 }
 
 /* ---------------- settings ---------------- */

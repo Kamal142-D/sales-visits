@@ -76,7 +76,7 @@ object AppUpdater {
         withContext(Dispatchers.IO) {
             val dir = File(context.cacheDir, "updates").apply { mkdirs() }
             dir.listFiles()?.forEach { it.delete() }
-            val file = File(dir, "sales-visits-${info.versionCode}.apk")
+            val file = File(dir, "visitflow-${info.versionCode}.apk")
             val conn = open(info.apkUrl)
             try {
                 if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")

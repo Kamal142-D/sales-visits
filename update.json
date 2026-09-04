@@ -1,6 +1,6 @@
 {
-  "versionCode": 5,
-  "versionName": "1.4",
+  "versionCode": 6,
+  "versionName": "1.5",
   "apkUrl": "https://raw.githubusercontent.com/Kamal142-D/sales-visits/main/app-release.apk",
-  "notes": "VisitFlow v1.4: مسار يوم متعدد المحطات واتجاهات مباشرة في Google Maps، تنسيق وإملاء ملاحظات الزيارات بالعربية والإنجليزية، ألوان كلاسيكية أو دافئة من الإعدادات، شريط تنقل أبسط، وأيقونات Solar Linear جديدة."
+  "notes": "VisitFlow v1.5: حساب شخصي ومزامنة آمنة للزيارات والعملاء وخطة اليوم عبر Firebase، تسجيل صوتي لملاحظات الزيارة، وتحسين شاشة اليوم ونتائج الزيارات."
 }

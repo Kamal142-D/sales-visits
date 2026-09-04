@@ -15,6 +15,7 @@ import dev.chiksmedina.solar.linear.SearchGroup
 import dev.chiksmedina.solar.linear.SettingsFineTuningGroup
 import dev.chiksmedina.solar.linear.ShoppingEcommerceGroup
 import dev.chiksmedina.solar.linear.UsersGroup
+import dev.chiksmedina.solar.linear.VideoAudioSoundGroup
 import dev.chiksmedina.solar.linear.arrows.AltArrowLeft
 import dev.chiksmedina.solar.linear.arrows.AltArrowRight
 import dev.chiksmedina.solar.linear.arrows.Refresh
@@ -45,6 +46,7 @@ import dev.chiksmedina.solar.linear.shoppingecommerce.ShopMinimalistic
 import dev.chiksmedina.solar.linear.users.User
 import dev.chiksmedina.solar.linear.users.UserPlus
 import dev.chiksmedina.solar.linear.users.UsersGroupRounded
+import dev.chiksmedina.solar.linear.videoaudiosound.Microphone
 
 /** The single Solar Linear style used throughout the app. */
 object AppIcons {
@@ -76,6 +78,7 @@ object AppIcons {
     val Update: ImageVector get() = ArrowsGroup.Refresh
     val Insights: ImageVector get() = BusinessStatisticGroup.Chart2
     val Map: ImageVector get() = MapLocationGroup.Route
+    val Mic: ImageVector get() = VideoAudioSoundGroup.Microphone
     val Visits: ImageVector get() = ShoppingEcommerceGroup.ShopMinimalistic
     val Report: ImageVector get() = NotesGroup.DocumentText
 }

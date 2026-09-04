@@ -4,6 +4,10 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -16,6 +20,8 @@ class Store(context: Context) {
     private val sp = appContext.getSharedPreferences("sales_visits", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
     private val prettyJson = Json { ignoreUnknownKeys = true; prettyPrint = true }
+    private var applyingCloud = false
+    internal var onDataChanged: (() -> Unit)? = null
 
     var visits by mutableStateOf(load())
         private set
@@ -67,6 +73,7 @@ class Store(context: Context) {
 
     private fun persist() {
         sp.edit().putString("visits", json.encodeToString(visits)).apply()
+        if (!applyingCloud) onDataChanged?.invoke()
     }
 
     fun upsert(v: Visit) {
@@ -99,6 +106,7 @@ class Store(context: Context) {
 
     private fun persistCustomers() {
         sp.edit().putString("customers", json.encodeToString(customers)).apply()
+        if (!applyingCloud) onDataChanged?.invoke()
     }
 
     private fun migrateCustomersFromVisits() {
@@ -210,6 +218,26 @@ class Store(context: Context) {
         )
     )
 
+    internal fun cloudSnapshot(): String = json.encodeToString(
+        AppBackup(exportedAt = "", visits = visits, customers = customers, plan = plan)
+    )
+
+    internal fun mergeCloudSnapshot(raw: String): String? = runCatching {
+        val remote = json.decodeFromString<AppBackup>(raw)
+        require(remote.version == 1)
+        json.encodeToString(
+            mergeBackups(
+                AppBackup(exportedAt = "", visits = visits, customers = customers, plan = plan),
+                remote,
+            )
+        )
+    }.getOrNull()
+
+    internal fun restoreCloudSnapshot(raw: String): Boolean {
+        applyingCloud = true
+        return try { restoreBackup(raw) } finally { applyingCloud = false }
+    }
+
     fun restoreBackup(raw: String): Boolean = runCatching {
         val backup = json.decodeFromString<AppBackup>(raw)
         require(backup.version == 1)
@@ -234,6 +262,7 @@ class Store(context: Context) {
 
     private fun persistPlan() {
         sp.edit().putString("plan", json.encodeToString(plan)).apply()
+        if (!applyingCloud) onDataChanged?.invoke()
     }
 
     private fun pid(): String =
@@ -275,6 +304,19 @@ class Store(context: Context) {
     fun chooseAiModel(value: String) {
         aiModel = value.trim().ifBlank { "gemini-2.5-flash" }
         sp.edit().putString("ai_model", aiModel).apply()
+    }
+
+    // Runs past the editor's lifetime so formatting finishes even after the screen closes.
+    private val aiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    /** Formats a visit's raw note into both languages in the background, then saves the result. */
+    fun autoFormat(visitId: String, rawNote: String) {
+        if (apiKey.isBlank() || rawNote.isBlank()) return
+        aiScope.launch {
+            val r = runCatching { AiFormatter.format(apiKey, aiModel, rawNote) }.getOrNull() ?: return@launch
+            val current = visits.firstOrNull { it.id == visitId } ?: return@launch
+            if (r.ar.isNotBlank() || r.en.isNotBlank()) upsert(current.copy(notesAr = r.ar, notesEn = r.en))
+        }
     }
 
     fun countThisWeek(): Int = visits.count { inWeek(it.date, 0) }
