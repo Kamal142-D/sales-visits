@@ -4382,16 +4382,29 @@ private fun TodayScreen(
         val live = store.plan.firstOrNull { it.id == picked.id }
         if (live == null) detailItem = null
         else PlanDetailSheet(
-            store = store,
-            item = live,
+            store = store, item = live,
+            onToggleDone = { store.togglePlan(live.id) },
+            onReschedule = { store.reschedulePlan(live.id, it) },
+            onSaveEdit = { a, cl, ti, m -> store.updatePlan(live.id, a, cl, ti, m) },
+            onDelete = { store.deletePlan(live.id) },
             onDeleted = { detailItem = null },
             onDismiss = { detailItem = null },
         )
     }
 
-    // Tapping a task in the daily agenda (overdue / due-today / decisions) opens its full details.
+    // Tapping a task in the daily agenda (overdue / due-today / decisions) opens the same detail card.
     taskDetail?.let { picked ->
-        TaskSheet(store, editing = picked, date = picked.date.ifBlank { selectedDate }) { taskDetail = null }
+        val live = store.tasks.firstOrNull { it.id == picked.id }
+        if (live == null) taskDetail = null
+        else PlanDetailSheet(
+            store = store, item = live,
+            onToggleDone = { store.toggleTask(live.id) },
+            onReschedule = { store.rescheduleTask(live.id, it) },
+            onSaveEdit = { a, cl, ti, m -> store.updateTask(live.id, a, cl, ti, m) },
+            onDelete = { store.deleteTask(live.id) },
+            onDeleted = { taskDetail = null },
+            onDismiss = { taskDetail = null },
+        )
     }
 }
 
@@ -4683,7 +4696,15 @@ private fun RoadStop(
 /** Full detail card for a route stop (tap-to-open). Shows every field of the plan item plus quick
  *  actions (navigate / call / calendar), status toggle, reschedule, inline edit and delete. */
 @Composable
-private fun PlanDetailSheet(store: Store, item: PlanItem, onDeleted: () -> Unit, onDismiss: () -> Unit) {
+private fun PlanDetailSheet(
+    store: Store, item: PlanItem,
+    onToggleDone: () -> Unit,
+    onReschedule: (String) -> Unit,
+    onSaveEdit: (String, String, String, Int) -> Unit,
+    onDelete: () -> Unit,
+    onDeleted: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     val c = LocalSales.current
     val t = LocalL.current
     val ctx = LocalContext.current
@@ -4746,7 +4767,7 @@ private fun PlanDetailSheet(store: Store, item: PlanItem, onDeleted: () -> Unit,
                 }
                 Spacer(Modifier.height(10.dp))
                 Surface(
-                    onClick = { store.updatePlan(item.id, eAction, eClient, eTime, eMinutes); editing = false },
+                    onClick = { onSaveEdit(eAction, eClient, eTime, eMinutes); editing = false },
                     shape = RoundedCornerShape(16.dp), color = c.ink, modifier = Modifier.fillMaxWidth().height(52.dp),
                 ) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(t["save"], color = c.onInk, fontWeight = FontWeight.Bold, fontSize = 15.sp) } }
                 TextButton(onClick = { editing = false }, modifier = Modifier.fillMaxWidth()) { Text(t["cancel"], color = c.muted) }
@@ -4786,7 +4807,7 @@ private fun PlanDetailSheet(store: Store, item: PlanItem, onDeleted: () -> Unit,
 
                 Spacer(Modifier.height(14.dp))
                 Surface(
-                    onClick = { store.togglePlan(item.id) },
+                    onClick = onToggleDone,
                     shape = RoundedCornerShape(16.dp), color = if (done) c.sunk else c.ink,
                     border = if (done) androidx.compose.foundation.BorderStroke(1.dp, c.edge) else null,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -4801,8 +4822,8 @@ private fun PlanDetailSheet(store: Store, item: PlanItem, onDeleted: () -> Unit,
                 Spacer(Modifier.height(6.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val base = runCatching { java.time.LocalDate.parse(item.date) }.getOrDefault(java.time.LocalDate.now())
-                    ChoiceChip(t["move_tomorrow"], false) { store.reschedulePlan(item.id, base.plusDays(1).toString()); onDismiss() }
-                    ChoiceChip(t["move_day_after"], false) { store.reschedulePlan(item.id, base.plusDays(2).toString()); onDismiss() }
+                    ChoiceChip(t["move_tomorrow"], false) { onReschedule(base.plusDays(1).toString()); onDismiss() }
+                    ChoiceChip(t["move_day_after"], false) { onReschedule(base.plusDays(2).toString()); onDismiss() }
                     ChoiceChip(t["move_pick_day"], false) { showDate = true }
                 }
 
@@ -4811,7 +4832,7 @@ private fun PlanDetailSheet(store: Store, item: PlanItem, onDeleted: () -> Unit,
                     TextButton(onClick = { eAction = item.action; eClient = item.client; eTime = item.time; eMinutes = item.minutes; editing = true }, modifier = Modifier.weight(1f)) {
                         Text(t["edit"], color = c.ink2, fontWeight = FontWeight.Bold)
                     }
-                    TextButton(onClick = { store.deletePlan(item.id); onDeleted() }, modifier = Modifier.weight(1f)) {
+                    TextButton(onClick = { onDelete(); onDeleted() }, modifier = Modifier.weight(1f)) {
                         Icon(AppIcons.Delete, null, tint = c.lost, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
                         Text(t["delete"], color = c.lost, fontWeight = FontWeight.Bold)
@@ -4822,7 +4843,7 @@ private fun PlanDetailSheet(store: Store, item: PlanItem, onDeleted: () -> Unit,
     }
 
     if (showTime) TimePick(eTime.ifBlank { nowHm() }) { eTime = it; showTime = false }
-    if (showDate) DatePick(item.date) { showDate = false; store.reschedulePlan(item.id, it); onDismiss() }
+    if (showDate) DatePick(item.date) { showDate = false; onReschedule(it); onDismiss() }
     if (showCallChooser) {
         AlertDialog(
             onDismissRequest = { showCallChooser = false },
