@@ -14,3 +14,10 @@ app/build/
 desktop/build/
 dist/
 tmp/
+
+# Launcher icon design sources (not needed in repo)
+Icons/
+
+# Firebase emulator debug logs
+firestore-debug.log
+firebase-debug.log

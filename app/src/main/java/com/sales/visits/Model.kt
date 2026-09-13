@@ -518,6 +518,24 @@ data class Objection(
     val response: String = "",
 )
 
+/**
+ * An attachment (plan 6.3): file metadata that syncs; the bytes live in cloud storage (not the
+ * snapshot). `uploaded=false` means it's still local-only (deferred upload, or storage not enabled).
+ */
+@Serializable
+data class Attachment(
+    val id: String,
+    val recordType: String = "",     // CUSTOMER | QUOTE | OPP | VISIT
+    val recordId: String = "",
+    val name: String = "",
+    val mime: String = "",
+    val size: Long = 0,
+    val storagePath: String = "",    // e.g. users/{uid}/attachments/{id}
+    val localPath: String = "",      // on-device path ("" once only in cloud)
+    val uploaded: Boolean = false,
+    val createdAt: String = "",
+)
+
 /** Versioned portable payload used by the settings backup/import flow.
  *  New lists carry defaults so older backups (which lack them) still restore cleanly. */
 @Serializable
@@ -535,6 +553,7 @@ data class AppBackup(
     val quotes: List<Quote> = emptyList(),
     val products: List<ProductKnowledge> = emptyList(),
     val objections: List<Objection> = emptyList(),
+    val attachments: List<Attachment> = emptyList(),
 )
 
 /** Product matching (plan 6.1) — pure. Explains fit against a customer need; flags what's unverified. */
@@ -578,6 +597,7 @@ internal fun mergeBackups(local: AppBackup, remote: AppBackup): AppBackup = AppB
     quotes = (remote.quotes.associateBy { it.id } + local.quotes.associateBy { it.id }).values.toList(),
     products = (remote.products.associateBy { it.id } + local.products.associateBy { it.id }).values.toList(),
     objections = (remote.objections.associateBy { it.id } + local.objections.associateBy { it.id }).values.toList(),
+    attachments = (remote.attachments.associateBy { it.id } + local.attachments.associateBy { it.id }).values.toList(),
 )
 
 internal fun checkCloudMerge() {

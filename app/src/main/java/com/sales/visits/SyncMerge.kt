@@ -43,6 +43,7 @@ object SyncMerge {
             quotes = tally(mergeList(base.quotes, local.quotes, remote.quotes, { it.id }, { v, id -> v.copy(id = id) })),
             products = tally(mergeList(base.products, local.products, remote.products, { it.id }, { v, id -> v.copy(id = id) })),
             objections = tally(mergeList(base.objections, local.objections, remote.objections, { it.id }, { v, id -> v.copy(id = id) })),
+            attachments = tally(mergeList(base.attachments, local.attachments, remote.attachments, { it.id }, { v, id -> v.copy(id = id) })),
         )
         return Result(out, conflicts)
     }

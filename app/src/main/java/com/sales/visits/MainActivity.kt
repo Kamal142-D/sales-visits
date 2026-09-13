@@ -9,6 +9,7 @@ package com.sales.visits
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.provider.CalendarContract
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -1128,6 +1129,12 @@ private fun CustomerProfileScreen(store: Store, customer: Customer, onEdit: (Cus
     val quotes = store.quotesForCustomer(cust)
     var quoteEditorOpen by remember { mutableStateOf(false) }
     var editingQuote by remember { mutableStateOf<Quote?>(null) }
+    // Attachments (6.3) — metadata syncs; bytes upload when Firebase Storage is enabled.
+    val storageRepo = remember { StorageRepo(ctx.applicationContext, store) }
+    val attachments = store.attachmentsFor("CUSTOMER", cust.id)
+    val attPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { storageRepo.addFromUri(it, "CUSTOMER", cust.id) }
+    }
     // Pre-visit AI brief (plan 4.1)
     val scope = rememberCoroutineScope()
     var briefOpen by remember { mutableStateOf(false) }
@@ -1312,6 +1319,38 @@ private fun CustomerProfileScreen(store: Store, customer: Customer, onEdit: (Cus
                                     Text(q.statusEnum().label(t.en) + (if (q.orderId.isNotBlank()) " · ${t["order"]}" else ""), color = c.muted, fontSize = 12.sp)
                                 }
                                 Text("${fmtMoney(QuoteMath.total(q))}${if (q.currency.isNotBlank()) " " + q.currency else ""}", color = c.ink, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Attachments (6.3)
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(t["attachments"], color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Surface(onClick = { runCatching { attPicker.launch(arrayOf("*/*")) } }, shape = RoundedCornerShape(999.dp), color = c.ink) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(AppIcons.Add, null, tint = c.onInk, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text(t["add_file"], color = c.onInk, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                if (attachments.isEmpty()) {
+                    Spacer(Modifier.height(10.dp)); Text(t["no_attachments"], color = c.muted, fontSize = 13.sp)
+                } else attachments.forEach { a ->
+                    Spacer(Modifier.height(10.dp))
+                    Surface(shape = RoundedCornerShape(12.dp), color = c.sunk, modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(AppIcons.Inbox, null, tint = c.ink2, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(a.name, color = c.ink, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(if (a.uploaded) t["att_uploaded"] else t["att_local"], color = c.muted, fontSize = 11.sp)
+                            }
+                            IconButton(onClick = { store.deleteAttachment(a.id) }, modifier = Modifier.size(28.dp)) {
+                                Icon(AppIcons.Delete, t["delete"], tint = c.faint, modifier = Modifier.size(16.dp))
                             }
                         }
                     }
@@ -3987,6 +4026,15 @@ private fun TaskSheet(store: Store, editing: PlanItem?, date: String, onDismiss:
                 }
             }
 
+            // Add this follow-up to the device calendar (6.4 — works with any calendar app).
+            val calCtx = LocalContext.current
+            Row(Modifier.padding(bottom = 8.dp)) {
+                ChoiceChip(t["add_to_calendar"], false) {
+                    val title = listOf(client, action).filter { it.isNotBlank() }.joinToString(": ").ifBlank { t["tasks_tab"] }
+                    launchCalendarInsert(calCtx, title, action, date, time, minutes)
+                }
+            }
+
             Spacer(Modifier.height(10.dp))
             Surface(
                 onClick = {
@@ -4058,6 +4106,7 @@ private fun TodayScreen(
     BackHandler(selecting) { exitSelect() }
     var goalDialog by remember { mutableStateOf(false) }
     var showCalendar by remember { mutableStateOf(false) }
+    var detailItem by remember { mutableStateOf<PlanItem?>(null) }
     val visitsToday = store.visitsOn(selectedDate)
 
     FrostedScaffold(header = {
@@ -4286,6 +4335,7 @@ private fun TodayScreen(
                             if (selecting) { if (item.id in selected) selected.remove(item.id) else selected.add(item.id) }
                             else store.togglePlan(item.id)
                         },
+                        onOpen = { detailItem = item },
                         onLongPress = { if (!selecting) { selecting = true; selected.add(item.id) } },
                         onMoveUp = { store.movePlan(item.id, true) },
                         onMoveDown = { store.movePlan(item.id, false) },
@@ -4324,6 +4374,19 @@ private fun TodayScreen(
             containerColor = c.surface,
         )
     }
+
+    // Tapping a route stop opens its full details.
+    detailItem?.let { picked ->
+        // Resolve the live item so it reflects toggles/edits made while the sheet is open.
+        val live = store.plan.firstOrNull { it.id == picked.id }
+        if (live == null) detailItem = null
+        else PlanDetailSheet(
+            store = store,
+            item = live,
+            onDeleted = { detailItem = null },
+            onDismiss = { detailItem = null },
+        )
+    }
 }
 
 @Composable
@@ -4353,6 +4416,31 @@ private fun DueFollowUpRow(visit: Visit, onClick: () -> Unit) {
             )
         }
     }
+}
+
+/**
+ * Opens the device calendar prefilled to create an event (plan 6.4, no-OAuth slice). Works with any
+ * installed calendar (Google/Outlook/…). If time is blank the event is all-day on [dateIso].
+ */
+private fun launchCalendarInsert(ctx: android.content.Context, title: String, description: String, dateIso: String, timeHm: String, minutes: Int) {
+    val intent = Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI)
+        .putExtra(CalendarContract.Events.TITLE, title.ifBlank { description }.ifBlank { "Follow-up" })
+        .putExtra(CalendarContract.Events.DESCRIPTION, description)
+    runCatching {
+        val date = java.time.LocalDate.parse(dateIso)
+        if (timeHm.isBlank()) {
+            val begin = date.atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+            intent.putExtra(CalendarContract.EXTRA_EVENT_ALL_DAY, true)
+                .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
+        } else {
+            val parts = timeHm.split(":")
+            val begin = date.atTime(parts.getOrNull(0)?.toIntOrNull() ?: 9, parts.getOrNull(1)?.toIntOrNull() ?: 0)
+                .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+            intent.putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
+                .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, begin + (minutes.takeIf { it > 0 } ?: 30) * 60_000L)
+        }
+    }
+    runCatching { ctx.startActivity(intent) }
 }
 
 @Composable
@@ -4454,7 +4542,7 @@ private fun AgendaRow(item: AgendaItem, store: Store, onEditVisit: (Visit) -> Un
 private fun RoadStop(
     index: Int, item: PlanItem, customer: Customer?, first: Boolean, last: Boolean,
     selecting: Boolean, selectedNow: Boolean,
-    onToggle: () -> Unit, onLongPress: () -> Unit, onMoveUp: () -> Unit, onMoveDown: () -> Unit,
+    onToggle: () -> Unit, onOpen: () -> Unit, onLongPress: () -> Unit, onMoveUp: () -> Unit, onMoveDown: () -> Unit,
     onReschedule: (String) -> Unit,
 ) {
     val c = LocalSales.current
@@ -4495,7 +4583,7 @@ private fun RoadStop(
         Spacer(Modifier.width(12.dp))
         Surface(
             modifier = Modifier.weight(1f).padding(vertical = 6.dp)
-                .combinedClickable(onClick = onToggle, onLongClick = onLongPress),
+                .combinedClickable(onClick = { if (selecting) onToggle() else onOpen() }, onLongClick = onLongPress),
             shape = RoundedCornerShape(16.dp),
             color = if (selectedNow) c.sunk else c.surface,
             border = androidx.compose.foundation.BorderStroke(1.dp, if (selectedNow) c.ink else c.edge),
@@ -4579,6 +4667,196 @@ private fun RoadStop(
             },
             containerColor = c.surface,
         )
+    }
+}
+
+/** Full detail card for a route stop (tap-to-open). Shows every field of the plan item plus quick
+ *  actions (navigate / call / calendar), status toggle, reschedule, inline edit and delete. */
+@Composable
+private fun PlanDetailSheet(store: Store, item: PlanItem, onDeleted: () -> Unit, onDismiss: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val ctx = LocalContext.current
+    val sheetState = rememberModalBottomSheetState()
+    val st = item.statusEnum()
+    val done = item.done
+    val customer = store.customerFor(item.client)
+    val opp = item.opportunityId.takeIf { it.isNotBlank() }?.let { id -> store.opportunities.firstOrNull { it.id == id } }
+    val callable = customer?.contacts?.filter { it.phone.isNotBlank() }
+        ?.ifEmpty { if (customer.phone.isNotBlank()) listOf(ContactPerson(customer.contact, "", customer.phone)) else emptyList() }
+        ?: emptyList()
+    val locUrl = customer?.locationUrl?.trim().orEmpty()
+    val address = customer?.address?.trim().orEmpty()
+
+    var editing by remember { mutableStateOf(false) }
+    var eAction by remember { mutableStateOf(item.action) }
+    var eClient by remember { mutableStateOf(item.client) }
+    var eTime by remember { mutableStateOf(item.time) }
+    var eMinutes by remember { mutableStateOf(item.minutes) }
+    var showTime by remember { mutableStateOf(false) }
+    var showDate by remember { mutableStateOf(false) }
+    var showCallChooser by remember { mutableStateOf(false) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss, sheetState = sheetState, containerColor = c.surface,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = {
+            Box(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.width(40.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(c.edge))
+            }
+        },
+    ) {
+        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState())) {
+            // Header: title + status pill + close
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    item.action.ifBlank { item.client }.ifBlank { t["task_details"] },
+                    fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = c.ink, modifier = Modifier.weight(1f),
+                )
+                CircleBtn(CloseXIcon, t["done"]) { onDismiss() }
+            }
+            Surface(shape = RoundedCornerShape(999.dp), color = if (done) c.ok.copy(alpha = 0.15f) else c.sunk) {
+                Text(
+                    st.label(t.en), Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    color = if (done) c.ok else c.ink2, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+
+            if (editing) {
+                LabeledBlock(t["task_action"]) { Input(eAction, { eAction = it }, t["plan_hint"]) }
+                LabeledBlock(t["choose_customer"]) { Input(eClient, { eClient = it }, t["choose_customer"]) }
+                PickerField(t["time"], if (eTime.isBlank()) t["none"] else fmtTime(eTime), Modifier.fillMaxWidth().padding(bottom = 15.dp)) { showTime = true }
+                LabeledBlock(t["duration"]) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(0, 15, 30, 45, 60, 90, 120).forEach { m ->
+                            ChoiceChip(if (m == 0) t["none"] else fmtDuration(m, t.en), eMinutes == m) { eMinutes = m }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Surface(
+                    onClick = { store.updatePlan(item.id, eAction, eClient, eTime, eMinutes); editing = false },
+                    shape = RoundedCornerShape(16.dp), color = c.ink, modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(t["save"], color = c.onInk, fontWeight = FontWeight.Bold, fontSize = 15.sp) } }
+                TextButton(onClick = { editing = false }, modifier = Modifier.fillMaxWidth()) { Text(t["cancel"], color = c.muted) }
+            } else {
+                // Detail rows
+                DetailRow(AppIcons.Person, t["choose_customer"], item.client.ifBlank { t["none"] })
+                DetailRow(AppIcons.Calendar, t["date"], fullDay(item.date))
+                if (item.time.isNotBlank()) DetailRow(AppIcons.Notifications, t["time"], fmtTime(item.time))
+                if (item.minutes > 0) DetailRow(AppIcons.Plan, t["duration"], fmtDuration(item.minutes, t.en))
+                item.source.takeIf { it.isNotBlank() && it != TaskSource.MANUAL.name }
+                    ?.let { runCatching { TaskSource.valueOf(it) }.getOrNull() }
+                    ?.let { DetailRow(AppIcons.Plan, t["task_source"], it.label(t.en)) }
+                opp?.let { DetailRow(AppIcons.Directions, t["opp_link"], it.title) }
+                if (item.completedAt.isNotBlank()) DetailRow(AppIcons.Check, t["completed"], fullDay(item.completedAt))
+                if (item.result.isNotBlank()) DetailRow(AppIcons.Plan, t["result"], item.result)
+
+                Spacer(Modifier.height(14.dp))
+                // Quick actions
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (locUrl.isNotBlank() || address.isNotBlank()) {
+                        ChoiceChip(t["navigate"], false) {
+                            val uri = if (locUrl.isNotBlank()) Uri.parse(locUrl) else mapsRouteUri(listOf(address))
+                            runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                        }
+                    }
+                    if (callable.isNotEmpty()) {
+                        ChoiceChip(t["call"], false) {
+                            if (callable.size == 1) runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + callable[0].phone.trim()))) }
+                            else showCallChooser = true
+                        }
+                    }
+                    ChoiceChip(t["add_to_calendar"], false) {
+                        val title = listOf(item.client, item.action).filter { it.isNotBlank() }.joinToString(": ").ifBlank { t["task_details"] }
+                        launchCalendarInsert(ctx, title, item.action, item.date, item.time, item.minutes)
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+                Surface(
+                    onClick = { store.togglePlan(item.id) },
+                    shape = RoundedCornerShape(16.dp), color = if (done) c.sunk else c.ink,
+                    border = if (done) androidx.compose.foundation.BorderStroke(1.dp, c.edge) else null,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(if (done) t["mark_undone"] else t["mark_done"], color = if (done) c.ink else c.onInk, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Text(t["reschedule"], color = c.muted, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val base = runCatching { java.time.LocalDate.parse(item.date) }.getOrDefault(java.time.LocalDate.now())
+                    ChoiceChip(t["move_tomorrow"], false) { store.reschedulePlan(item.id, base.plusDays(1).toString()); onDismiss() }
+                    ChoiceChip(t["move_day_after"], false) { store.reschedulePlan(item.id, base.plusDays(2).toString()); onDismiss() }
+                    ChoiceChip(t["move_pick_day"], false) { showDate = true }
+                }
+
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { eAction = item.action; eClient = item.client; eTime = item.time; eMinutes = item.minutes; editing = true }, modifier = Modifier.weight(1f)) {
+                        Text(t["edit"], color = c.ink2, fontWeight = FontWeight.Bold)
+                    }
+                    TextButton(onClick = { store.deletePlan(item.id); onDeleted() }, modifier = Modifier.weight(1f)) {
+                        Icon(AppIcons.Delete, null, tint = c.lost, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(t["delete"], color = c.lost, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showTime) TimePick(eTime.ifBlank { nowHm() }) { eTime = it; showTime = false }
+    if (showDate) DatePick(item.date) { showDate = false; store.reschedulePlan(item.id, it); onDismiss() }
+    if (showCallChooser) {
+        AlertDialog(
+            onDismissRequest = { showCallChooser = false },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showCallChooser = false }) { Text(t["cancel"], color = c.muted) } },
+            title = { Text(t["choose_contact"]) },
+            text = {
+                Column {
+                    callable.forEach { cp ->
+                        Surface(
+                            onClick = {
+                                showCallChooser = false
+                                runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + cp.phone.trim()))) }
+                            },
+                            color = Color.Transparent, modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(AppIcons.Phone, null, tint = c.ink2, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(cp.name.ifBlank { cp.phone }, color = c.ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    if (cp.name.isNotBlank()) Text(cp.phone, color = c.muted, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            containerColor = c.surface,
+        )
+    }
+}
+
+@Composable
+private fun DetailRow(icon: ImageVector, label: String, value: String) {
+    val c = LocalSales.current
+    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.Top) {
+        Icon(icon, null, tint = c.muted, modifier = Modifier.size(18.dp).padding(top = 1.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label, color = c.muted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(2.dp))
+            Text(value, color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 

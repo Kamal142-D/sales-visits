@@ -87,6 +87,7 @@ dependencies {
     implementation(firebaseBom)
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-storage")   // attachment sync (plan 6.3)
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

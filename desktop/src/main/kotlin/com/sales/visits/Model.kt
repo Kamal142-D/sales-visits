@@ -273,6 +273,21 @@ data class Objection(
     val response: String = "",
 )
 
+/** Attachment metadata (round-tripped for cloud sync; bytes live in cloud storage). */
+@Serializable
+data class Attachment(
+    val id: String,
+    val recordType: String = "",
+    val recordId: String = "",
+    val name: String = "",
+    val mime: String = "",
+    val size: Long = 0,
+    val storagePath: String = "",
+    val localPath: String = "",
+    val uploaded: Boolean = false,
+    val createdAt: String = "",
+)
+
 /** Versioned portable payload used by the settings backup/import flow and cloud sync. */
 @Serializable
 data class AppBackup(
@@ -289,6 +304,7 @@ data class AppBackup(
     val quotes: List<Quote> = emptyList(),
     val products: List<ProductKnowledge> = emptyList(),
     val objections: List<Objection> = emptyList(),
+    val attachments: List<Attachment> = emptyList(),
 )
 
 @Serializable
@@ -315,6 +331,7 @@ internal fun mergeBackups(local: AppBackup, remote: AppBackup): AppBackup = AppB
     quotes = (remote.quotes.associateBy { it.id } + local.quotes.associateBy { it.id }).values.toList(),
     products = (remote.products.associateBy { it.id } + local.products.associateBy { it.id }).values.toList(),
     objections = (remote.objections.associateBy { it.id } + local.objections.associateBy { it.id }).values.toList(),
+    attachments = (remote.attachments.associateBy { it.id } + local.attachments.associateBy { it.id }).values.toList(),
 )
 
 internal fun checkCloudMerge() {

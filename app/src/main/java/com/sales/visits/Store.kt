@@ -371,7 +371,7 @@ class Store(context: Context) {
     private fun snapshot(exportedAt: String) = AppBackup(
         exportedAt = exportedAt, visits = visits, customers = customers,
         plan = plan, tasks = tasks, inventory = inventory, opportunities = opportunities, orders = orders,
-        activities = activities, quotes = quotes, products = products, objections = objections,
+        activities = activities, quotes = quotes, products = products, objections = objections, attachments = attachments,
     )
 
     fun exportBackup(): String = prettyJson.encodeToString(snapshot(java.time.Instant.now().toString()))
@@ -428,8 +428,8 @@ class Store(context: Context) {
         if (prev != null && prev != uid) {
             visits.forEach { ReminderScheduler.cancel(appContext, it.id) }
             visits = emptyList(); customers = emptyList(); plan = emptyList()
-            tasks = emptyList(); inventory = emptyList(); opportunities = emptyList(); orders = emptyList(); activities = emptyList(); quotes = emptyList(); products = emptyList(); objections = emptyList()
-            persist(); persistCustomers(); persistPlan(); persistTasks(); persistInventory(); persistOpportunities(); persistOrders(); persistActivities(); persistQuotes(); persistProducts(); persistObjections()
+            tasks = emptyList(); inventory = emptyList(); opportunities = emptyList(); orders = emptyList(); activities = emptyList(); quotes = emptyList(); products = emptyList(); objections = emptyList(); attachments = emptyList()
+            persist(); persistCustomers(); persistPlan(); persistTasks(); persistInventory(); persistOpportunities(); persistOrders(); persistActivities(); persistQuotes(); persistProducts(); persistObjections(); persistAttachments()
             setProfilePhoto("")   // the photo is per-account and local; drop the previous one
         }
         sp.edit().putString("last_account_uid", uid).apply()
@@ -451,6 +451,7 @@ class Store(context: Context) {
         quotes = backup.quotes
         products = backup.products
         objections = backup.objections
+        attachments = backup.attachments
         persist()
         persistCustomers()
         persistPlan()
@@ -462,6 +463,7 @@ class Store(context: Context) {
         persistQuotes()
         persistProducts()
         persistObjections()
+        persistAttachments()
         ReminderScheduler.reschedule(appContext, visits)
         true
     }.getOrDefault(false)
@@ -828,6 +830,35 @@ class Store(context: Context) {
     fun deleteObjection(id: String) { objections = objections.filter { it.id != id }; persistObjections() }
     fun newObjectionId(): String = pid()
 
+    // ---- Attachments (metadata synced; bytes in cloud storage — plan 6.3) ----
+    var attachments by mutableStateOf(loadAttachments())
+        private set
+
+    private fun loadAttachments(): List<Attachment> =
+        runCatching { json.decodeFromString<List<Attachment>>(sp.getString("attachments", "[]") ?: "[]") }.getOrDefault(emptyList())
+
+    private fun persistAttachments() {
+        sp.edit().putString("attachments", json.encodeToString(attachments)).apply()
+        if (!applyingCloud) onDataChanged?.invoke()
+    }
+
+    fun upsertAttachment(a: Attachment) {
+        attachments = if (attachments.any { it.id == a.id }) attachments.map { if (it.id == a.id) a else it } else attachments + a
+        persistAttachments()
+    }
+
+    fun deleteAttachment(id: String) { attachments = attachments.filter { it.id != id }; persistAttachments() }
+    fun newAttachmentId(): String = pid()
+
+    fun attachmentsFor(recordType: String, recordId: String): List<Attachment> =
+        attachments.filter { it.recordType == recordType && it.recordId == recordId }.sortedByDescending { it.createdAt }
+
+    /** Marks an attachment uploaded (called by the storage layer after a successful upload). */
+    fun markAttachmentUploaded(id: String, storagePath: String) {
+        attachments = attachments.map { if (it.id == id) it.copy(uploaded = true, storagePath = storagePath) else it }
+        persistAttachments()
+    }
+
     // ---- Orders / purchases (linked to a customer by name) ----
     var orders by mutableStateOf(loadOrders())
         private set
@@ -943,7 +974,8 @@ class Store(context: Context) {
         quotes = after.quotes
         products = after.products
         objections = after.objections
-        persist(); persistCustomers(); persistPlan(); persistTasks(); persistOpportunities(); persistOrders(); persistActivities(); persistQuotes(); persistProducts(); persistObjections()
+        attachments = after.attachments
+        persist(); persistCustomers(); persistPlan(); persistTasks(); persistOpportunities(); persistOrders(); persistActivities(); persistQuotes(); persistProducts(); persistObjections(); persistAttachments()
     }
 
     init { migrateLoaded() }
