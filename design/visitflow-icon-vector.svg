@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <defs>
+    <linearGradient id="tile" x1="176" y1="96" x2="820" y2="930" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#242425"/>
+      <stop offset="0.55" stop-color="#111112"/>
+      <stop offset="1" stop-color="#050506"/>
+    </linearGradient>
+    <linearGradient id="silverA" x1="270" y1="205" x2="430" y2="500" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.52" stop-color="#F1F1F1"/>
+      <stop offset="1" stop-color="#A9A9AB"/>
+    </linearGradient>
+    <linearGradient id="silverB" x1="625" y1="180" x2="690" y2="510" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.58" stop-color="#F4F4F4"/>
+      <stop offset="1" stop-color="#B9B9BB"/>
+    </linearGradient>
+    <linearGradient id="silverC" x1="500" y1="550" x2="450" y2="860" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8F8F8"/>
+      <stop offset="0.22" stop-color="#C8C8CA"/>
+      <stop offset="1" stop-color="#7D7D80"/>
+    </linearGradient>
+    <linearGradient id="silverD" x1="790" y1="550" x2="755" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.42" stop-color="#D9D9DB"/>
+      <stop offset="1" stop-color="#969699"/>
+    </linearGradient>
+    <pattern id="ribs" width="14" height="14" patternUnits="userSpaceOnUse">
+      <path d="M1 0V14" stroke="#FFFFFF" stroke-opacity="0.025"/>
+    </pattern>
+    <filter id="tileShadow" x="-12%" y="-12%" width="124%" height="132%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="24" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <filter id="pieceShadow" x="-18%" y="-18%" width="140%" height="150%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="14" stdDeviation="11" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <rect x="48" y="48" width="928" height="928" rx="218" fill="url(#tile)" filter="url(#tileShadow)"/>
+  <rect x="48" y="48" width="928" height="928" rx="218" fill="url(#ribs)"/>
+  <rect x="49" y="49" width="926" height="926" rx="217" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2"/>
+
+  <g filter="url(#pieceShadow)">
+    <path d="M174 478C188 319 316 190 478 174V408C478 447 447 478 408 478H174Z" fill="url(#silverA)"/>
+    <path d="M548 174C710 190 838 319 852 478H618C579 478 548 447 548 408V174Z" fill="url(#silverB)"/>
+    <path d="M174 548H548C589 548 622 581 622 622V852C393 842 207 676 174 548Z" fill="url(#silverC)"/>
+    <path d="M698 622C698 581 731 548 772 548H852C842 638 783 719 698 765V622Z" fill="url(#silverD)"/>
+  </g>
+
+  <g fill="none" stroke="#FFFFFF" stroke-opacity="0.42" stroke-width="3">
+    <path d="M178 470C197 321 318 201 470 180"/>
+    <path d="M556 180C707 201 829 322 847 470"/>
+    <path d="M183 556H548C584 556 614 586 614 622"/>
+    <path d="M706 622C706 586 736 556 772 556H844"/>
+  </g>
+</svg>

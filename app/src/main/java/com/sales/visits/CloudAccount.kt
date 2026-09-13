@@ -94,8 +94,11 @@ class CloudAccount(context: Context, private val store: Store) {
             if (!snapshot.metadata.hasPendingWrites() && !remote.isNullOrBlank()) {
                 val last = prefs.getString(lastKey(next.uid), null)
                 if (remote != last) {
-                    store.restoreCloudSnapshot(remote)
-                    saveLast(next.uid, remote)
+                    // A remote change arrived. Reconcile via the transactional upload, which three-way
+                    // merges local+remote against our last-synced base — so an incoming change never
+                    // clobbers an unpushed local edit, deletes are honored, and conflicts keep both.
+                    upload(store.cloudSnapshot())
+                    return@addSnapshotListener
                 }
             }
             syncState = if (snapshot.metadata.hasPendingWrites()) "syncing" else "synced"
@@ -103,6 +106,8 @@ class CloudAccount(context: Context, private val store: Store) {
     }
 
     private fun resolveFirstSync(uid: String, remote: String?) {
+        // Drop a previous account's leftover local data before merging, so accounts stay isolated.
+        store.prepareForAccount(uid)
         val local = store.cloudSnapshot()
         if (remote.isNullOrBlank()) {
             upload(local)
@@ -112,11 +117,17 @@ class CloudAccount(context: Context, private val store: Store) {
         val resolved = when {
             local == last -> remote
             remote == last -> local
-            else -> store.mergeCloudSnapshot(remote) ?: local
+            else -> store.threeWayMerge(last, local, remote) ?: local
         }
         if (resolved != local) store.restoreCloudSnapshot(resolved)
-        saveLast(uid, resolved)
-        if (resolved != remote) upload(resolved) else syncState = "synced"
+        if (resolved == remote) {
+            // Nothing new to push; remote is already the agreed state.
+            saveLast(uid, resolved)
+            syncState = if (store.lastMergeConflicts > 0) "conflict" else "synced"
+        } else {
+            // Push through the transactional upload (base stays `last`, so it merges — not clobbers).
+            upload(resolved)
+        }
     }
 
     private fun queueUpload() {
@@ -128,21 +139,36 @@ class CloudAccount(context: Context, private val store: Store) {
         }
     }
 
+    /**
+     * Pushes [snapshot] inside a Firestore transaction: it re-reads the latest remote and three-way
+     * merges local+remote against our last-synced base BEFORE writing. This closes the lost-update
+     * window — a concurrent push from another device is merged in, never overwritten. The document is
+     * only marked synced (and `last` advanced) on a confirmed write, so a rejected/oversized push
+     * stays "offline", never a false "synced".
+     */
     private fun upload(snapshot: String) {
         val current = user ?: return
         syncState = "syncing"
-        // ponytail: one Firestore document is capped at 1 MiB; split into collections when real account data approaches it.
-        val data = mapOf(
-            "snapshot" to snapshot,
-            "profile" to json.encodeToString(profile),
-            "updatedAt" to FieldValue.serverTimestamp(),
-        )
-        stateRef(current.uid).set(data, SetOptions.merge())
-            .addOnSuccessListener {
-                saveLast(current.uid, snapshot)
-                syncState = "synced"
-            }
-            .addOnFailureListener { syncState = "offline" }
+        val ref = stateRef(current.uid)
+        val base = prefs.getString(lastKey(current.uid), null)
+        val profileJson = json.encodeToString(profile)
+        // One Firestore document is capped at ~1 MiB; a write beyond it fails the transaction and we
+        // surface "offline" (not "synced"). Split into per-collection docs when data approaches it.
+        db.runTransaction { txn ->
+            val remoteNow = txn.get(ref).getString("snapshot")
+            val merged = if (remoteNow.isNullOrBlank()) snapshot
+                else store.threeWayMerge(base, snapshot, remoteNow) ?: snapshot
+            txn.set(
+                ref,
+                mapOf("snapshot" to merged, "profile" to profileJson, "updatedAt" to FieldValue.serverTimestamp()),
+                SetOptions.merge(),
+            )
+            merged
+        }.addOnSuccessListener { merged ->
+            saveLast(current.uid, merged)
+            if (merged != snapshot) store.restoreCloudSnapshot(merged)   // reflect merged-in remote changes locally
+            syncState = if (store.lastMergeConflicts > 0) "conflict" else "synced"
+        }.addOnFailureListener { syncState = "offline" }
     }
 
     fun signIn(email: String, password: String) {
@@ -193,6 +219,8 @@ class CloudAccount(context: Context, private val store: Store) {
         val clean = value.copy(
             name = value.name.trim(), jobTitle = value.jobTitle.trim(),
             company = value.company.trim(), phone = value.phone.trim(),
+            companyEmail = value.companyEmail.trim(),
+            shareLoginEmail = value.shareLoginEmail,
         )
         if (clean.name.isBlank()) { errorCode = "name"; return }
         profile = clean

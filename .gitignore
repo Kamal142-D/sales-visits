@@ -8,3 +8,9 @@
 .externalNativeBuild/
 .cxx/
 app/build/
+
+# Desktop build outputs and installers (too large for git)
+*.exe
+desktop/build/
+dist/
+tmp/

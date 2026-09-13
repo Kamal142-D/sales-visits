@@ -1,0 +1,14 @@
+{
+  "name": "visitflow-firestore-rules-tests",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Firebase Security Rules emulator tests for VisitFlow (plan phase 1.5).",
+  "scripts": {
+    "test": "npx --yes firebase-tools@latest emulators:exec --only firestore --project demo-visitflow \"node rules.test.mjs\""
+  },
+  "dependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase": "^10.13.0"
+  }
+}

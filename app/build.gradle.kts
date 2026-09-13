@@ -13,8 +13,8 @@ android {
         applicationId = "com.visit.flow"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.6"
+        versionCode = 9
+        versionName = "1.7"
     }
 
     signingConfigs {
@@ -78,6 +78,7 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     implementation("dev.chrisbanes.haze:haze:0.7.3")
+    implementation("com.google.zxing:core:3.5.3")   // QR generation for the shareable contact card
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
@@ -88,4 +89,8 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // JVM unit tests for pure logic (migration, linking, type mapping) — no device needed.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 }

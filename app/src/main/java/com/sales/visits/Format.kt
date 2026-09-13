@@ -85,22 +85,39 @@ fun fmtTime(t: String): String {
     return "$h:${m.toString().padStart(2, '0')} $ap"
 }
 
-/** Saturday-start week containing today, shifted by offset weeks back. */
+/** Formats a money amount, dropping a trailing ".0" and grouping thousands. */
+fun fmtMoney(v: Double): String {
+    val rounded = if (v == v.toLong().toDouble()) v.toLong().toString() else "%.2f".format(v)
+    // group the integer part with commas
+    val parts = rounded.split(".")
+    val intPart = parts[0].reversed().chunked(3).joinToString(",").reversed()
+    return if (parts.size > 1) "$intPart.${parts[1]}" else intPart
+}
+
+/** The configurable first day of the week (defaults to Saturday); set from settings on launch. */
+object WeekConfig {
+    var startDay: DayOfWeek = DayOfWeek.SATURDAY
+}
+
+/** Week (starting on [WeekConfig.startDay]) containing today, shifted by offset weeks back. */
 fun weekStart(offset: Int): LocalDate {
-    val d = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.SATURDAY))
+    val d = LocalDate.now().with(TemporalAdjusters.previousOrSame(WeekConfig.startDay))
     return d.minusWeeks(offset.toLong())
 }
+
+/** The working week is the start day plus 4 more days (5 days total, e.g. Sunday–Thursday). */
+const val WORK_WEEK_DAYS = 5
 
 fun inWeek(iso: String, offset: Int): Boolean {
     val d = parseIso(iso) ?: return false
     val s = weekStart(offset)
-    val e = s.plusDays(7)
+    val e = s.plusDays(WORK_WEEK_DAYS.toLong())
     return !d.isBefore(s) && d.isBefore(e)
 }
 
 fun weekLabel(offset: Int): String {
     val s = weekStart(offset)
-    val e = s.plusDays(6)
+    val e = s.plusDays((WORK_WEEK_DAYS - 1).toLong())
     return "${s.dayOfMonth} ${monthName(s)} – ${e.dayOfMonth} ${monthName(e)}"
 }
 
@@ -111,7 +128,7 @@ fun weekVisits(all: List<Visit>, offset: Int): List<Visit> =
 fun reportText(all: List<Visit>, offset: Int): String {
     val en = I18n.en
     val vs = weekVisits(all, offset)
-    val s = weekStart(offset); val e = s.plusDays(6)
+    val s = weekStart(offset); val e = s.plusDays((WORK_WEEK_DAYS - 1).toLong())
     val sb = StringBuilder()
     val range = if (en) "${monthName(s)} ${s.dayOfMonth} – ${monthName(e)} ${e.dayOfMonth}"
     else "${s.dayOfMonth} ${monthName(s)} – ${e.dayOfMonth} ${monthName(e)}"

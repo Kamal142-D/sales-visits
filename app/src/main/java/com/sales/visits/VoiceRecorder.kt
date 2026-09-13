@@ -29,6 +29,9 @@ class VoiceRecorder(private val context: Context) {
         output = file
     }.isSuccess
 
+    /** Current peak amplitude (0..32767) for a live recording meter; 0 when idle. */
+    fun amplitude(): Int = runCatching { recorder?.maxAmplitude ?: 0 }.getOrDefault(0)
+
     /** Stops and returns the recorded file, or null if nothing usable was captured. */
     fun stop(): File? {
         val rec = recorder ?: return null

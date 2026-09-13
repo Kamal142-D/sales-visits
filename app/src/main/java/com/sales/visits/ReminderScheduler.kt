@@ -17,6 +17,12 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 
+/** The time of day follow-up reminders fire (set from settings; defaults to 09:00). */
+object ReminderConfig {
+    var hour: Int = 9
+    var minute: Int = 0
+}
+
 object ReminderScheduler {
     private const val CHANNEL_ID = "sales_follow_ups"
 
@@ -28,7 +34,7 @@ object ReminderScheduler {
         cancel(context, visit.id)
         if (visit.next.isBlank() || visit.nextDate.isBlank()) return
         val date = runCatching { LocalDate.parse(visit.nextDate) }.getOrNull() ?: return
-        val trigger = date.atTime(LocalTime.of(9, 0)).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val trigger = date.atTime(LocalTime.of(ReminderConfig.hour, ReminderConfig.minute)).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         if (trigger <= System.currentTimeMillis()) return
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, reminderIntent(context, visit))
@@ -58,10 +64,11 @@ object ReminderScheduler {
     internal fun show(context: Context, visitId: String, client: String, step: String) {
         if (!notificationsEnabled(context)) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val en = I18n.en
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "متابعات العملاء", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                    description = "تذكير بمواعيد متابعة العملاء"
+                NotificationChannel(CHANNEL_ID, if (en) "Customer follow-ups" else "متابعات العملاء", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = if (en) "Reminders for customer follow-up dates" else "تذكير بمواعيد متابعة العملاء"
                 }
             )
         }
@@ -71,7 +78,7 @@ object ReminderScheduler {
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_popup_reminder)
-            .setContentTitle("متابعة $client")
+            .setContentTitle((if (en) "Follow up: " else "متابعة ") + client)
             .setContentText(step)
             .setStyle(NotificationCompat.BigTextStyle().bigText(step))
             .setContentIntent(openApp)

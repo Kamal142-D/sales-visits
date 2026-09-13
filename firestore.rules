@@ -1,0 +1,100 @@
+rules_version = '2';
+
+// VisitFlow Firestore security rules.
+// Deploy from the Firebase console (Firestore → Rules) or the CLI:
+//   firebase deploy --only firestore:rules
+//
+// Enforcement happens in the BACKEND (not by hiding UI). In particular:
+//  - Each account can read/write only its own users/{uid} subtree.
+//  - Company data is readable only by that company's members.
+//  - A rep CANNOT promote themselves to manager: the founding manager row is bound to the company's
+//    ownerUid (validated atomically in the creation batch via getAfter), and a self-join can only
+//    create a REP row and only when it presents the company's current invite code.
+//  - Only a manager can change roles, edit the company, or manage assignments; a rep may flip only
+//    the `done` flag on an assignment that is assigned to them.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- helpers ----
+    function signedIn() { return request.auth != null; }
+
+    function companyPath(cid) { return /databases/$(database)/documents/companies/$(cid); }
+
+    // State of the company doc AFTER this commit — lets a creation batch validate the founding
+    // manager row against the company row written in the SAME batch.
+    function companyAfter(cid) { return getAfter(companyPath(cid)).data; }
+
+    function memberPath(cid, uid) {
+      return /databases/$(database)/documents/companies/$(cid)/members/$(uid);
+    }
+    function isMember(cid) { return signedIn() && exists(memberPath(cid, request.auth.uid)); }
+    function memberRole(cid) { return get(memberPath(cid, request.auth.uid)).data.role; }
+    function isManager(cid) { return isMember(cid) && memberRole(cid) == 'MANAGER'; }
+
+    // ---- per-account private data (visits/customers snapshot, membership pointer, etc.) ----
+    match /users/{uid}/{document=**} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // ---- companies ----
+    match /companies/{cid} {
+      allow read: if isMember(cid);
+      // Anyone signed in may create a company, but only as its own owner.
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      // A manager may edit the company but can never reassign ownership away.
+      allow update: if isManager(cid) && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if isManager(cid);
+
+      // ---- members ----
+      match /members/{memberUid} {
+        allow read: if isMember(cid);
+
+        // Creating a member row:
+        //  - a manager may add anyone (any role); OR
+        //  - the founding OWNER may create their OWN manager row (tied to the company's ownerUid); OR
+        //  - a user may create their OWN rep row, but only by presenting the company's invite code.
+        allow create: if isManager(cid) || (
+          signedIn() && memberUid == request.auth.uid && (
+            (request.resource.data.role == 'MANAGER' && companyAfter(cid).ownerUid == request.auth.uid) ||
+            (request.resource.data.role == 'REP' && request.resource.data.inviteCode == companyAfter(cid).inviteCode)
+          )
+        );
+
+        // Only a manager changes roles (and the role must stay a known value).
+        allow update: if isManager(cid) && request.resource.data.role in ['MANAGER', 'REP'];
+
+        // A user may remove their OWN membership (leave); a manager may remove anyone.
+        // NOTE: "don't remove/demote the LAST manager" cannot be counted in rules (no aggregation);
+        // it is guarded in the client and would need a Cloud Function for true backend enforcement.
+        allow delete: if request.auth.uid == memberUid || isManager(cid);
+      }
+
+      // ---- assignments (manager-owned work board) ----
+      match /assignments/{aid} {
+        allow read: if isMember(cid);
+        allow create, delete: if isManager(cid);
+        // A manager may edit freely; the assigned rep may change ONLY the `done` flag on their own
+        // item — never reassign it, move it to another customer, or touch another rep's work.
+        allow update: if isManager(cid) || (
+          resource.data.assignedTo == request.auth.uid &&
+          request.resource.data.assignedTo == resource.data.assignedTo &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['done'])
+        );
+      }
+    }
+
+    // ---- invite codes (code → companyId) ----
+    // Readable by any signed-in user (so a joiner can resolve a code to a company), but only the
+    // company's owner (at founding) or a manager (rotation) may create/change them.
+    match /inviteCodes/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn() && (
+        companyAfter(request.resource.data.companyId).ownerUid == request.auth.uid ||
+        isManager(request.resource.data.companyId)
+      );
+      allow update, delete: if signedIn() && isManager(resource.data.companyId);
+    }
+
+    // Everything else is denied by default.
+  }
+}

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">VisitFlow</string>
+    <string name="nfc_service_desc">Share your contact card over NFC</string>
+    <string name="nfc_aid_desc">VisitFlow contact card</string>
 </resources>
