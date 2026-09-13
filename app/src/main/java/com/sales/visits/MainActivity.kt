@@ -4107,6 +4107,7 @@ private fun TodayScreen(
     var goalDialog by remember { mutableStateOf(false) }
     var showCalendar by remember { mutableStateOf(false) }
     var detailItem by remember { mutableStateOf<PlanItem?>(null) }
+    var taskDetail by remember { mutableStateOf<PlanItem?>(null) }
     val visitsToday = store.visitsOn(selectedDate)
 
     FrostedScaffold(header = {
@@ -4212,7 +4213,7 @@ private fun TodayScreen(
         val agenda = if (selectedDate == todayIso())
             buildAgenda(todayIso(), store.tasks, store.visits, store.opportunities, store.quotes) else null
         if (agenda != null) {
-            AgendaBlock(agenda, store, onEdit)
+            AgendaBlock(agenda, store, onEdit, onOpenTask = { taskDetail = it })
         } else if (due.isNotEmpty()) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp)) {
                 Text(t["due_followups"], color = c.muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
@@ -4387,6 +4388,11 @@ private fun TodayScreen(
             onDismiss = { detailItem = null },
         )
     }
+
+    // Tapping a task in the daily agenda (overdue / due-today / decisions) opens its full details.
+    taskDetail?.let { picked ->
+        TaskSheet(store, editing = picked, date = picked.date.ifBlank { selectedDate }) { taskDetail = null }
+    }
 }
 
 @Composable
@@ -4456,7 +4462,7 @@ private fun agendaReasonLabel(r: AgendaReason): String {
 }
 
 @Composable
-private fun AgendaBlock(agenda: Agenda, store: Store, onEditVisit: (Visit) -> Unit) {
+private fun AgendaBlock(agenda: Agenda, store: Store, onEditVisit: (Visit) -> Unit, onOpenTask: (PlanItem) -> Unit) {
     val c = LocalSales.current
     val t = LocalL.current
     @Composable
@@ -4464,7 +4470,7 @@ private fun AgendaBlock(agenda: Agenda, store: Store, onEditVisit: (Visit) -> Un
         if (items.isEmpty()) return
         Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp)) {
             Text(title, color = c.muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-            items.forEach { item -> AgendaRow(item, store, onEditVisit) }
+            items.forEach { item -> AgendaRow(item, store, onEditVisit, onOpenTask) }
         }
     }
     section(t["agenda_overdue"], agenda.overdue)
@@ -4473,7 +4479,7 @@ private fun AgendaBlock(agenda: Agenda, store: Store, onEditVisit: (Visit) -> Un
 }
 
 @Composable
-private fun AgendaRow(item: AgendaItem, store: Store, onEditVisit: (Visit) -> Unit) {
+private fun AgendaRow(item: AgendaItem, store: Store, onEditVisit: (Visit) -> Unit, onOpenTask: (PlanItem) -> Unit) {
     val c = LocalSales.current
     val t = LocalL.current
     val isTask = item.kind == "TASK"
@@ -4484,7 +4490,11 @@ private fun AgendaRow(item: AgendaItem, store: Store, onEditVisit: (Visit) -> Un
         else -> AppIcons.Check
     }
     val onOpen: () -> Unit = {
-        if (item.kind == "VISIT") store.visits.firstOrNull { it.id == item.refId }?.let(onEditVisit)
+        when (item.kind) {
+            "VISIT" -> store.visits.firstOrNull { it.id == item.refId }?.let(onEditVisit)
+            "TASK" -> store.tasks.firstOrNull { it.id == item.refId }?.let(onOpenTask)
+            else -> {}
+        }
     }
     Surface(
         onClick = onOpen,
