@@ -6099,6 +6099,7 @@ private fun TeamScreen(team: CompanyRepository, account: CloudAccount, onBack: (
             var teamGoalDialog by remember { mutableStateOf(false) }
             var repFilter by remember { mutableStateOf<String?>(null) }   // rep name filter (null = all)
             var statusFilter by remember { mutableStateOf(0) }            // 0 all · 1 pending · 2 done
+            var shareOppOpen by remember { mutableStateOf(false) }        // share-to-team dialog (6.2)
 
             if (team.isManager) {
                 val total = team.assignments.size
@@ -6204,7 +6205,48 @@ private fun TeamScreen(team: CompanyRepository, account: CloudAccount, onBack: (
                 }
             }
 
+            // ---- Team pipeline: shared opportunities visible to the whole team (6.2) ----
+            val myUid = account.user?.uid.orEmpty()
+            Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 18.dp, top = 16.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${t["team_pipeline"]} · ${team.teamOpps.size}", color = c.muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Surface(onClick = { shareOppOpen = true }, shape = RoundedCornerShape(999.dp), color = c.ink) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(AppIcons.Add, null, tint = c.onInk, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text(t["team_share_opp"], color = c.onInk, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            if (team.teamOpps.isEmpty()) {
+                Text(t["team_pipeline_empty"], color = c.muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp))
+            } else {
+                Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    team.teamOpps.forEach { o ->
+                        Surface(shape = RoundedCornerShape(14.dp), color = c.surface, border = androidx.compose.foundation.BorderStroke(1.dp, c.edge)) {
+                            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(o.title, color = c.ink, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    val sub = listOf(o.customerName, o.ownerName.ifBlank { null }?.let { "${t["owner"]}: $it" }).filterNotNull().filter { it.isNotBlank() }.joinToString(" · ")
+                                    if (sub.isNotBlank()) Text(sub, color = c.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                if (o.value > 0) Text("${fmtMoney(o.value)}${if (o.currency.isNotBlank()) " " + o.currency else ""}", color = c.ink, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+                                // Only the owner or a manager can delete (backend also enforces this).
+                                if (team.isManager || o.ownerUid == myUid) {
+                                    Spacer(Modifier.width(6.dp))
+                                    IconButton(onClick = { team.deleteTeamOpportunity(o.id) }, modifier = Modifier.size(28.dp)) {
+                                        Icon(AppIcons.Delete, t["delete"], tint = c.faint, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if (assignOpen) AssignmentSheet(team, team.members) { assignOpen = false }
+            if (shareOppOpen) ShareOppSheet { title, cust, value, cur ->
+                team.shareOpportunity(title, cust, value, cur); shareOppOpen = false
+            }
             reassignFor?.let { a ->
                 RepPickerSheet(team.members, t["reassign"]) { m ->
                     if (m != null) team.reassign(a.id, m.uid, m.name.ifBlank { m.email })
@@ -6282,6 +6324,33 @@ private fun AssignmentRow(
             if (isManager) {
                 IconButton(onClick = onReassign) { Icon(AppIcons.People, t["reassign"], tint = c.ink2, modifier = Modifier.size(18.dp)) }
                 IconButton(onClick = onDelete) { Icon(AppIcons.Delete, t["delete"], tint = c.faint, modifier = Modifier.size(17.dp)) }
+            }
+        }
+    }
+}
+
+/** Share a deal to the team pipeline (6.2). Plain inputs; the repo tags it with the sharer as owner. */
+@Composable
+private fun ShareOppSheet(onShare: (String, String, Double, String) -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val sheetState = rememberModalBottomSheetState()
+    var title by remember { mutableStateOf("") }
+    var customer by remember { mutableStateOf("") }
+    var value by remember { mutableStateOf("") }
+    var currency by remember { mutableStateOf("") }
+    ModalBottomSheet(onDismissRequest = { onShare("", "", 0.0, "") }, sheetState = sheetState, containerColor = c.surface) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+            Text(t["team_share_opp"], fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = c.ink, modifier = Modifier.padding(bottom = 10.dp))
+            LabeledBlock(t["opp_title"]) { Input(title, { title = it }, t["opp_title_hint"]) }
+            LabeledBlock(t["customer_name"]) { Input(customer, { customer = it }, t["customer_name"]) }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.weight(1f)) { LabeledBlock(t["opp_value"]) { Input(value, { value = it.filter { ch -> ch.isDigit() || ch == '.' } }, "0", kb = KeyboardType.Number) } }
+                Box(Modifier.weight(1f)) { LabeledBlock(t["currency"]) { Input(currency, { currency = it }, t["currency_hint"]) } }
+            }
+            Spacer(Modifier.height(10.dp))
+            PrimaryButton(t["team_share_opp"], enabled = title.isNotBlank()) {
+                onShare(title.trim(), customer.trim(), value.toDoubleOrNull() ?: 0.0, currency.trim())
             }
         }
     }

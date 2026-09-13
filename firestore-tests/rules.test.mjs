@@ -14,7 +14,7 @@ import {
   initializeTestEnvironment, assertFails, assertSucceeds,
 } from '@firebase/rules-unit-testing';
 import {
-  doc, setDoc, getDoc, updateDoc, writeBatch, setLogLevel,
+  doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch, setLogLevel,
 } from 'firebase/firestore';
 
 setLogLevel('error');
@@ -38,6 +38,10 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(s, 'companies/co1/assignments/a1'), { customerName: 'C1', assignedTo: 'rep', done: false });
   await setDoc(doc(s, 'companies/co1/assignments/a2'), { customerName: 'C2', assignedTo: 'mgr', done: false });
   await setDoc(doc(s, 'inviteCodes/ABC123'), { companyId: 'co1' });
+  // Shared company records (plan 6.2): one owned by the rep, one by the manager.
+  await setDoc(doc(s, 'companies/co1/opportunities/oRep'), { title: 'Rep deal', ownerUid: 'rep' });
+  await setDoc(doc(s, 'companies/co1/opportunities/oMgr'), { title: 'Mgr deal', ownerUid: 'mgr' });
+  await setDoc(doc(s, 'companies/co1/customers/cuRep'), { name: 'Shared Cust', ownerUid: 'rep' });
 });
 
 let passed = 0, failed = 0;
@@ -112,6 +116,26 @@ await check('rep cannot mint an invite code',
   assertFails(setDoc(doc(db('rep'), 'inviteCodes/HACK01'), { companyId: 'co1' })));
 await check('manager can mint an invite code',
   assertSucceeds(setDoc(doc(db('mgr'), 'inviteCodes/MGR777'), { companyId: 'co1' })));
+
+// 13) Shared company records (plan 6.2) — team scope + owner/manager write matrix.
+await check('member (rep) can read a shared company opportunity',
+  assertSucceeds(getDoc(doc(db('rep'), 'companies/co1/opportunities/oMgr'))));
+await check('non-member cannot read shared company records',
+  assertFails(getDoc(doc(db('stranger'), 'companies/co1/opportunities/oRep'))));
+await check('rep can edit their OWN shared opportunity',
+  assertSucceeds(updateDoc(doc(db('rep'), 'companies/co1/opportunities/oRep'), { title: 'Rep deal v2' })));
+await check("rep cannot edit another member's shared opportunity",
+  assertFails(updateDoc(doc(db('rep'), 'companies/co1/opportunities/oMgr'), { title: 'hijack' })));
+await check('rep cannot reassign ownership of their own record',
+  assertFails(updateDoc(doc(db('rep'), 'companies/co1/opportunities/oRep'), { ownerUid: 'mgr' })));
+await check('manager can edit any shared opportunity',
+  assertSucceeds(updateDoc(doc(db('mgr'), 'companies/co1/opportunities/oRep'), { title: 'mgr edit' })));
+await check('member creates a shared record only as its own owner',
+  assertSucceeds(setDoc(doc(db('rep'), 'companies/co1/customers/newCu'), { name: 'New', ownerUid: 'rep' })));
+await check('member cannot create a shared record owned by someone else',
+  assertFails(setDoc(doc(db('rep'), 'companies/co1/customers/spoof'), { name: 'X', ownerUid: 'mgr' })));
+await check('rep can delete their own shared customer, not others’',
+  assertSucceeds(deleteDoc(doc(db('rep'), 'companies/co1/customers/cuRep'))));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 await testEnv.cleanup();

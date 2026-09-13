@@ -36,6 +36,7 @@ class CompanyRepository(
     var role by mutableStateOf<TeamRole?>(null); private set
     var members by mutableStateOf<List<TeamMember>>(emptyList()); private set
     var assignments by mutableStateOf<List<Assignment>>(emptyList()); private set
+    var teamOpps by mutableStateOf<List<TeamOpp>>(emptyList()); private set   // shared company pipeline (6.2)
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
 
@@ -43,6 +44,7 @@ class CompanyRepository(
     private var companyReg: ListenerRegistration? = null
     private var membersReg: ListenerRegistration? = null
     private var assignmentsReg: ListenerRegistration? = null
+    private var teamOppsReg: ListenerRegistration? = null
 
     private val authListener = FirebaseAuth.AuthStateListener { start() }
 
@@ -108,18 +110,53 @@ class CompanyRepository(
                     )
                 }.orEmpty().sortedWith(compareBy({ it.done }, { it.customerName }))
             }
+        teamOppsReg = db.collection("companies").document(cid).collection("opportunities")
+            .addSnapshotListener { snap, _ ->
+                teamOpps = snap?.documents?.map {
+                    TeamOpp(
+                        id = it.id,
+                        title = it.getString("title").orEmpty(),
+                        customerName = it.getString("customerName").orEmpty(),
+                        value = it.getDouble("value") ?: 0.0,
+                        currency = it.getString("currency").orEmpty(),
+                        stage = it.getString("stage").orEmpty().ifBlank { "NEW" },
+                        ownerUid = it.getString("ownerUid").orEmpty(),
+                        ownerName = it.getString("ownerName").orEmpty(),
+                    )
+                }.orEmpty().sortedByDescending { it.value }
+            }
     }
 
     private fun detachCompany() {
         companyReg?.remove(); companyReg = null
         membersReg?.remove(); membersReg = null
         assignmentsReg?.remove(); assignmentsReg = null
+        teamOppsReg?.remove(); teamOppsReg = null
     }
 
     private fun reset() {
         detachCompany()
         companyId = null; companyName = ""; inviteCode = ""; role = null
-        members = emptyList(); assignments = emptyList()
+        members = emptyList(); assignments = emptyList(); teamOpps = emptyList()
+    }
+
+    /** Share an opportunity to the whole team (plan 6.2). Tagged with the sharer as ownerUid; the
+     *  backend rules let only that owner (or a manager) edit/delete it. */
+    fun shareOpportunity(title: String, customerName: String, value: Double, currency: String) {
+        val cid = companyId ?: return
+        val uid = auth.currentUser?.uid ?: return
+        if (title.isBlank()) return
+        db.collection("companies").document(cid).collection("opportunities").add(mapOf(
+            "title" to title.trim(), "customerName" to customerName.trim(), "value" to value, "currency" to currency.trim(),
+            "stage" to "NEW", "ownerUid" to uid, "ownerName" to (members.firstOrNull { it.uid == uid }?.name ?: ""),
+            "createdAt" to FieldValue.serverTimestamp(),
+        ))
+    }
+
+    /** Delete a shared opportunity — the backend allows only its owner or a manager. */
+    fun deleteTeamOpportunity(id: String) {
+        val cid = companyId ?: return
+        db.collection("companies").document(cid).collection("opportunities").document(id).delete()
     }
 
     /** My own assigned work (what a rep sees on their plate). */

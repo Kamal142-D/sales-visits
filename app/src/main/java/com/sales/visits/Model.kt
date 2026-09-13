@@ -156,6 +156,18 @@ data class TeamMember(
     val role: TeamRole,
 )
 
+/** A shared company-pipeline opportunity (plan 6.2) as read from the cloud. Owner-scoped writes. */
+data class TeamOpp(
+    val id: String,
+    val title: String,
+    val customerName: String = "",
+    val value: Double = 0.0,
+    val currency: String = "",
+    val stage: String = "NEW",
+    val ownerUid: String = "",
+    val ownerName: String = "",
+)
+
 /** A unit of work a manager assigns to a rep: a customer to visit (shared at company level). */
 data class Assignment(
     val id: String,

@@ -81,6 +81,29 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['done'])
         );
       }
+
+      // ---- shared company records (plan 6.2): customers & opportunities visible to the whole team.
+      // Permission matrix enforced in the backend:
+      //  - read: any member (company scope);
+      //  - create: any member, and only tagged as their own (ownerUid == self);
+      //  - update: a manager (any), or the owning rep on their OWN record — and the rep can never
+      //    reassign ownership (ownerUid is immutable for a non-manager);
+      //  - delete: a manager, or the owning rep.
+      // Removing a member never touches these records, so their work/history is preserved.
+      match /customers/{docId} {
+        allow read: if isMember(cid);
+        allow create: if isMember(cid) && request.resource.data.ownerUid == request.auth.uid;
+        allow update: if isManager(cid) ||
+          (resource.data.ownerUid == request.auth.uid && request.resource.data.ownerUid == resource.data.ownerUid);
+        allow delete: if isManager(cid) || resource.data.ownerUid == request.auth.uid;
+      }
+      match /opportunities/{docId} {
+        allow read: if isMember(cid);
+        allow create: if isMember(cid) && request.resource.data.ownerUid == request.auth.uid;
+        allow update: if isManager(cid) ||
+          (resource.data.ownerUid == request.auth.uid && request.resource.data.ownerUid == resource.data.ownerUid);
+        allow delete: if isManager(cid) || resource.data.ownerUid == request.auth.uid;
+      }
     }
 
     // ---- invite codes (code → companyId) ----
