@@ -305,6 +305,22 @@ data class AppBackup(
     val products: List<ProductKnowledge> = emptyList(),
     val objections: List<Objection> = emptyList(),
     val attachments: List<Attachment> = emptyList(),
+    val projects: List<Project> = emptyList(),
+)
+
+/** A big project / account initiative (plan 6.6) — desktop mirror for lossless round-trip. */
+@Serializable
+data class Project(
+    val id: String,
+    val customerId: String = "",
+    val customerName: String = "",
+    val name: String = "",
+    val description: String = "",
+    val opportunityIds: List<String> = emptyList(),
+    val stakeholderIds: List<String> = emptyList(),
+    val status: String = "ACTIVE",
+    val targetDate: String = "",
+    val createdAt: String = "",
 )
 
 @Serializable
@@ -332,6 +348,7 @@ internal fun mergeBackups(local: AppBackup, remote: AppBackup): AppBackup = AppB
     products = (remote.products.associateBy { it.id } + local.products.associateBy { it.id }).values.toList(),
     objections = (remote.objections.associateBy { it.id } + local.objections.associateBy { it.id }).values.toList(),
     attachments = (remote.attachments.associateBy { it.id } + local.attachments.associateBy { it.id }).values.toList(),
+    projects = (remote.projects.associateBy { it.id } + local.projects.associateBy { it.id }).values.toList(),
 )
 
 internal fun checkCloudMerge() {

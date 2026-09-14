@@ -372,6 +372,7 @@ class Store(context: Context) {
         exportedAt = exportedAt, visits = visits, customers = customers,
         plan = plan, tasks = tasks, inventory = inventory, opportunities = opportunities, orders = orders,
         activities = activities, quotes = quotes, products = products, objections = objections, attachments = attachments,
+        projects = projects,
     )
 
     fun exportBackup(): String = prettyJson.encodeToString(snapshot(java.time.Instant.now().toString()))
@@ -428,8 +429,8 @@ class Store(context: Context) {
         if (prev != null && prev != uid) {
             visits.forEach { ReminderScheduler.cancel(appContext, it.id) }
             visits = emptyList(); customers = emptyList(); plan = emptyList()
-            tasks = emptyList(); inventory = emptyList(); opportunities = emptyList(); orders = emptyList(); activities = emptyList(); quotes = emptyList(); products = emptyList(); objections = emptyList(); attachments = emptyList()
-            persist(); persistCustomers(); persistPlan(); persistTasks(); persistInventory(); persistOpportunities(); persistOrders(); persistActivities(); persistQuotes(); persistProducts(); persistObjections(); persistAttachments()
+            tasks = emptyList(); inventory = emptyList(); opportunities = emptyList(); orders = emptyList(); activities = emptyList(); quotes = emptyList(); products = emptyList(); objections = emptyList(); attachments = emptyList(); projects = emptyList()
+            persist(); persistCustomers(); persistPlan(); persistTasks(); persistInventory(); persistOpportunities(); persistOrders(); persistActivities(); persistQuotes(); persistProducts(); persistObjections(); persistAttachments(); persistProjects()
             setProfilePhoto("")   // the photo is per-account and local; drop the previous one
         }
         sp.edit().putString("last_account_uid", uid).apply()
@@ -452,6 +453,7 @@ class Store(context: Context) {
         products = backup.products
         objections = backup.objections
         attachments = backup.attachments
+        projects = backup.projects
         persist()
         persistCustomers()
         persistPlan()
@@ -464,6 +466,7 @@ class Store(context: Context) {
         persistProducts()
         persistObjections()
         persistAttachments()
+        persistProjects()
         ReminderScheduler.reschedule(appContext, visits)
         true
     }.getOrDefault(false)
@@ -859,6 +862,28 @@ class Store(context: Context) {
         persistAttachments()
     }
 
+    // ---- Projects / account map (plan 6.6) ----
+    var projects by mutableStateOf(loadProjects())
+        private set
+
+    private fun loadProjects(): List<Project> =
+        runCatching { json.decodeFromString<List<Project>>(sp.getString("projects", "[]") ?: "[]") }.getOrDefault(emptyList())
+
+    private fun persistProjects() {
+        sp.edit().putString("projects", json.encodeToString(projects)).apply()
+        if (!applyingCloud) onDataChanged?.invoke()
+    }
+
+    fun upsertProject(p: Project) {
+        projects = if (projects.any { it.id == p.id }) projects.map { if (it.id == p.id) p else it } else projects + p
+        persistProjects()
+    }
+
+    fun deleteProject(id: String) { projects = projects.filter { it.id != id }; persistProjects() }
+    fun newProjectId(): String = pid()
+
+    fun projectsFor(customerId: String): List<Project> = projects.filter { it.customerId == customerId }
+
     // ---- Orders / purchases (linked to a customer by name) ----
     var orders by mutableStateOf(loadOrders())
         private set
@@ -975,7 +1000,8 @@ class Store(context: Context) {
         products = after.products
         objections = after.objections
         attachments = after.attachments
-        persist(); persistCustomers(); persistPlan(); persistTasks(); persistOpportunities(); persistOrders(); persistActivities(); persistQuotes(); persistProducts(); persistObjections(); persistAttachments()
+        projects = after.projects
+        persist(); persistCustomers(); persistPlan(); persistTasks(); persistOpportunities(); persistOrders(); persistActivities(); persistQuotes(); persistProducts(); persistObjections(); persistAttachments(); persistProjects()
     }
 
     init { migrateLoaded() }

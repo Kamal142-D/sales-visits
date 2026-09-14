@@ -29,6 +29,7 @@ private data class StoredData(
     val products: List<ProductKnowledge> = emptyList(),
     val objections: List<Objection> = emptyList(),
     val attachments: List<Attachment> = emptyList(),
+    val projects: List<Project> = emptyList(),
 )
 
 /**
@@ -65,7 +66,7 @@ class Store(private val dir: File = defaultDataDir()) {
         val prev = prop("cloud_uid", "")
         if (prev.isNotBlank() && prev != uid) {
             visits = emptyList(); customers = emptyList(); plan = emptyList()
-            tasks = emptyList(); inventory = emptyList(); opportunities = emptyList(); orders = emptyList(); activities = emptyList(); quotes = emptyList(); products = emptyList(); objections = emptyList(); attachments = emptyList()
+            tasks = emptyList(); inventory = emptyList(); opportunities = emptyList(); orders = emptyList(); activities = emptyList(); quotes = emptyList(); products = emptyList(); objections = emptyList(); attachments = emptyList(); projects = emptyList()
             saveData()
         }
         setProp("cloud_uid", uid)
@@ -76,7 +77,7 @@ class Store(private val dir: File = defaultDataDir()) {
         runCatching { json.decodeFromString<StoredData>(dataFile.readText()) }.getOrDefault(StoredData())
 
     private fun saveData() {
-        dataFile.writeText(json.encodeToString(StoredData(visits, customers, plan, tasks, inventory, opportunities, orders, activities, quotes, products, objections, attachments)))
+        dataFile.writeText(json.encodeToString(StoredData(visits, customers, plan, tasks, inventory, opportunities, orders, activities, quotes, products, objections, attachments, projects)))
         if (!applyingRestore) onDataChanged?.invoke()
     }
 
@@ -95,6 +96,7 @@ class Store(private val dir: File = defaultDataDir()) {
     private var products: List<ProductKnowledge> = loadData().products
     private var objections: List<Objection> = loadData().objections
     private var attachments: List<Attachment> = loadData().attachments
+    private var projects: List<Project> = loadData().projects
 
     /** Add a follow-up task from desktop (e.g. via the assistant); returns its id. */
     fun addTask(action: String, client: String, date: String = todayIso(), time: String = ""): String {
@@ -351,7 +353,7 @@ class Store(private val dir: File = defaultDataDir()) {
             exportedAt = java.time.Instant.now().toString(), visits = visits,
             customers = customers, plan = plan, tasks = tasks, inventory = inventory,
             opportunities = opportunities, orders = orders, activities = activities, quotes = quotes,
-            products = products, objections = objections, attachments = attachments,
+            products = products, objections = objections, attachments = attachments, projects = projects,
         )
     )
 
@@ -373,6 +375,7 @@ class Store(private val dir: File = defaultDataDir()) {
                 products = backup.products
                 objections = backup.objections
                 attachments = backup.attachments
+                projects = backup.projects
                 saveData()
                 true
             }.getOrDefault(false)
@@ -386,6 +389,7 @@ class Store(private val dir: File = defaultDataDir()) {
         exportedAt = "", visits = visits, customers = customers,
         plan = plan, tasks = tasks, inventory = inventory, opportunities = opportunities, orders = orders,
         activities = activities, quotes = quotes, products = products, objections = objections, attachments = attachments,
+        projects = projects,
     )
 
     internal fun cloudSnapshot(): String = json.encodeToString(snapshotBackup())

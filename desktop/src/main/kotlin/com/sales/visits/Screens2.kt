@@ -55,7 +55,9 @@ import java.awt.FileDialog
 import java.io.File
 import java.net.URI
 import java.time.LocalDate
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ------------------------------- customers -------------------------------
 
@@ -467,9 +469,36 @@ fun SettingsScreen(store: Store, cloud: CloudSync) {
         }
 
         SettingsCard(t["about"]) {
-            Text("VisitFlow · 1.7", color = c.ink2, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text("VisitFlow · ${DesktopUpdater.APP_VERSION}", color = c.ink2, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
             Text("Windows desktop edition", color = c.muted, fontSize = 12.sp)
+            Spacer(Modifier.height(12.dp))
+            var checking by remember { mutableStateOf(false) }
+            var updateMsg by remember { mutableStateOf<String?>(null) }
+            var update by remember { mutableStateOf<DesktopUpdater.Manifest?>(null) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(enabled = !checking, onClick = {
+                    checking = true; updateMsg = null; update = null
+                    scope.launch {
+                        val found = withContext(Dispatchers.IO) { DesktopUpdater.check() }
+                        checking = false
+                        update = found
+                        updateMsg = if (found != null) "${t["update_available"]} ${found.version}" else t["update_none"]
+                    }
+                }) { Text(if (checking) t["update_checking"] else t["check_updates"]) }
+                if (update != null) {
+                    Spacer(Modifier.width(10.dp))
+                    Button(onClick = { DesktopUpdater.openDownload(update!!.url) }) { Text(t["update_download"]) }
+                }
+            }
+            if (updateMsg != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(updateMsg!!, color = if (update != null) c.ok else c.muted, fontSize = 12.sp)
+                if (update != null && update!!.notes.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(update!!.notes, color = c.muted, fontSize = 12.sp)
+                }
+            }
         }
     }
 }

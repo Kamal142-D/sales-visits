@@ -4913,7 +4913,8 @@ private fun ToolsScreen(
         "lost" -> LostDealsScreen(store) { sub = null }
         "knowledge" -> ProductKnowledgeScreen(store) { sub = null }
         "objections" -> ObjectionsScreen(store) { sub = null }
-        else -> ToolsHub(onBack, onStock = { sub = "stock" }, onPrices = { sub = "prices" }, onMail = { sub = "mail" }, onInsights, onOpps, onTeam, onAsk = { sub = "ask" }, onAnalytics = { sub = "analytics" }, onWeekly = { sub = "weekly" }, onLost = { sub = "lost" }, onKnowledge = { sub = "knowledge" }, onObjections = { sub = "objections" })
+        "projects" -> ProjectsScreen(store) { sub = null }
+        else -> ToolsHub(onBack, onStock = { sub = "stock" }, onPrices = { sub = "prices" }, onMail = { sub = "mail" }, onInsights, onOpps, onTeam, onAsk = { sub = "ask" }, onAnalytics = { sub = "analytics" }, onWeekly = { sub = "weekly" }, onLost = { sub = "lost" }, onKnowledge = { sub = "knowledge" }, onObjections = { sub = "objections" }, onProjects = { sub = "projects" })
     }
 }
 
@@ -4921,7 +4922,7 @@ private fun ToolsScreen(
 private fun ToolsHub(
     onBack: () -> Unit, onStock: () -> Unit, onPrices: () -> Unit, onMail: () -> Unit,
     onInsights: () -> Unit, onOpps: () -> Unit, onTeam: (() -> Unit)?, onAsk: () -> Unit, onAnalytics: () -> Unit, onWeekly: () -> Unit, onLost: () -> Unit,
-    onKnowledge: () -> Unit, onObjections: () -> Unit,
+    onKnowledge: () -> Unit, onObjections: () -> Unit, onProjects: () -> Unit,
 ) {
     val c = LocalSales.current
     val t = LocalL.current
@@ -4946,6 +4947,8 @@ private fun ToolsHub(
             SettingsRow(AppIcons.Report, t["weekly_review"]) { onWeekly() }
             HorizontalDivider(color = c.edge)
             SettingsRow(AppIcons.Chart, t["lost_deals"]) { onLost() }
+            HorizontalDivider(color = c.edge)
+            SettingsRow(AppIcons.Map, t["projects"]) { onProjects() }
             HorizontalDivider(color = c.edge)
             SettingsRow(AppIcons.Search, t["ask_data"]) { onAsk() }
             if (onTeam != null) {
@@ -5536,6 +5539,164 @@ private fun ObjectionSheet(store: Store, editing: Objection?, onDismiss: () -> U
             }
         }
     }
+}
+
+/** Big projects + account map (plan 6.6): group several deals under one account initiative and map
+ *  the stakeholders driving the decision. Combined value is shown per currency (never summed across). */
+@Composable
+private fun ProjectsScreen(store: Store, onBack: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    BackHandler(onBack = onBack)
+    var editing by remember { mutableStateOf<Project?>(null) }
+    var sheetOpen by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize().background(c.bg)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 10.dp, end = 22.dp, top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircleBtn(if (t.en) AppIcons.ArrowBack else AppIcons.ArrowForward, t["done"]) { onBack() }
+                Spacer(Modifier.width(12.dp))
+                Text(t["projects"], fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink)
+            }
+            if (store.projects.isEmpty()) Card { Text(t["proj_none"], color = c.muted, fontSize = 13.5.sp) }
+            else store.projects.forEach { p ->
+                val st = p.statusEnum()
+                val byCur = p.valueByCurrency(store.opportunities)
+                Card {
+                    Column(Modifier.fillMaxWidth().clickable { editing = p; sheetOpen = true }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(p.name.ifBlank { "—" }, color = c.ink, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Surface(shape = RoundedCornerShape(999.dp), color = c.sunk) {
+                                Text(st.label(t.en), Modifier.padding(horizontal = 10.dp, vertical = 4.dp), color = c.ink2, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        if (p.customerName.isNotBlank()) { Spacer(Modifier.height(3.dp)); Text(p.customerName, color = c.muted, fontSize = 13.sp) }
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            StatChip(AppIcons.Chart, "${p.opportunityIds.size} ${t["proj_deals"]}")
+                            if (p.stakeholderIds.isNotEmpty()) StatChip(AppIcons.People, "${p.stakeholderIds.size} ${t["proj_stakeholders"]}")
+                        }
+                        if (byCur.isNotEmpty()) {
+                            Spacer(Modifier.height(6.dp))
+                            byCur.forEach { (cur, v) -> Text("${fmtMoney(v)} $cur", color = c.ink2, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(120.dp))
+        }
+        Fab(onClick = { editing = null; sheetOpen = true }, modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = 24.dp))
+    }
+    if (sheetOpen) ProjectSheet(store, editing) { sheetOpen = false }
+}
+
+@Composable
+private fun ProjectSheet(store: Store, editing: Project?, onDismiss: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var name by remember { mutableStateOf(editing?.name ?: "") }
+    var client by remember { mutableStateOf(editing?.customerName ?: "") }
+    var description by remember { mutableStateOf(editing?.description ?: "") }
+    var status by remember { mutableStateOf(editing?.statusEnum() ?: ProjectStatus.ACTIVE) }
+    var targetDate by remember { mutableStateOf(editing?.targetDate ?: "") }
+    val oppIds = remember { mutableStateListOf<String>().apply { editing?.let { addAll(it.opportunityIds) } } }
+    val stakeholderIds = remember { mutableStateListOf<String>().apply { editing?.let { addAll(it.stakeholderIds) } } }
+    var pickerOpen by remember { mutableStateOf(false) }
+    var showDate by remember { mutableStateOf(false) }
+
+    val customer = store.customerFor(client)
+    // Deals for the chosen customer, so several can be rolled into this one project.
+    val custOpps = if (client.isBlank()) emptyList()
+        else store.opportunities.filter { (customer != null && it.customerId == customer.id) || it.customerName.trim().equals(client.trim(), ignoreCase = true) }
+    val contacts = customer?.contacts.orEmpty()
+    val byCur = custOpps.filter { it.id in oppIds }.groupBy { it.currency.ifBlank { "—" } }.mapValues { (_, l) -> l.sumOf { it.value } }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = c.surface) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState())) {
+            Text(if (editing == null) t["proj_add"] else t["proj_edit"], fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = c.ink, modifier = Modifier.padding(bottom = 10.dp))
+            LabeledBlock(t["proj_name"]) { Input(name, { name = it }, t["proj_name"]) }
+            LabeledBlock(t["choose_customer"]) {
+                Surface(onClick = { pickerOpen = true }, shape = RoundedCornerShape(12.dp), color = c.sunk, modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(AppIcons.Person, null, tint = c.ink2, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text(client.ifBlank { t["choose_customer"] }, color = if (client.isBlank()) c.faint else c.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+            LabeledBlock(t["proj_desc"]) { MultiField("", description, { description = it }, t["proj_desc"]) }
+
+            LabeledBlock(t["proj_status"]) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ProjectStatus.values().forEach { s -> ChoiceChip(s.label(t.en), status == s) { status = s } }
+                }
+            }
+            PickerField(t["proj_target"], if (targetDate.isBlank()) t["none"] else fullDay(targetDate), Modifier.fillMaxWidth().padding(bottom = 15.dp)) { showDate = true }
+
+            // Roll deals into the project.
+            if (custOpps.isNotEmpty()) LabeledBlock(t["proj_link_deals"]) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    custOpps.forEach { o ->
+                        ChoiceChip(o.title, o.id in oppIds) { if (o.id in oppIds) oppIds.remove(o.id) else oppIds.add(o.id) }
+                    }
+                }
+            } else if (client.isNotBlank()) {
+                Text(t["proj_no_deals"], color = c.muted, fontSize = 12.5.sp, modifier = Modifier.padding(bottom = 8.dp))
+            }
+            if (byCur.isNotEmpty()) {
+                Text(t["proj_total"], color = c.muted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(2.dp))
+                byCur.forEach { (cur, v) -> Text("${fmtMoney(v)} $cur", color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold) }
+                Spacer(Modifier.height(10.dp))
+            }
+
+            // Account map: the decision structure — who drives this deal.
+            if (contacts.isNotEmpty()) {
+                Text(t["account_map"], color = c.muted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
+                contacts.forEach { cp ->
+                    val cid = cp.id.ifBlank { cp.name }
+                    val on = cid in stakeholderIds
+                    val roles = cp.roles.mapNotNull { runCatching { DecisionRole.valueOf(it) }.getOrNull()?.label(t.en) }.joinToString(" · ")
+                    Surface(
+                        onClick = { if (on) stakeholderIds.remove(cid) else stakeholderIds.add(cid) },
+                        shape = RoundedCornerShape(12.dp), color = if (on) c.sunk else c.surface,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (on) c.ink else c.edge),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(cp.name.ifBlank { "—" }, color = c.ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                val sub = listOf(cp.jobTitle, roles).filter { it.isNotBlank() }.joinToString(" — ")
+                                if (sub.isNotBlank()) { Spacer(Modifier.height(2.dp)); Text(sub, color = c.muted, fontSize = 12.sp) }
+                            }
+                            if (on) Icon(CheckIcon, null, tint = c.ink, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            PrimaryButton(t["save"], enabled = name.isNotBlank()) {
+                store.upsertProject(
+                    Project(
+                        id = editing?.id ?: store.newProjectId(),
+                        customerId = customer?.id ?: editing?.customerId.orEmpty(),
+                        customerName = client.trim(),
+                        name = name.trim(), description = description.trim(),
+                        opportunityIds = oppIds.toList(), stakeholderIds = stakeholderIds.toList(),
+                        status = status.name, targetDate = targetDate,
+                        createdAt = editing?.createdAt?.ifBlank { todayIso() } ?: todayIso(),
+                    )
+                )
+                onDismiss()
+            }
+            if (editing != null) TextButton(onClick = { store.deleteProject(editing.id); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                Icon(AppIcons.Delete, null, tint = c.lost, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text(t["delete"], color = c.lost, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+    if (pickerOpen) CustomerPickerSheet(store, client, onPick = { client = it; pickerOpen = false }, onDismiss = { pickerOpen = false })
+    if (showDate) DatePick(targetDate.ifBlank { todayIso() }) { targetDate = it; showDate = false }
 }
 
 /** Compose an email (recipient from customer contacts) and hand it to the device's email app. */

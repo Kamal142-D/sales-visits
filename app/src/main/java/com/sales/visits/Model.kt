@@ -536,6 +536,40 @@ data class Attachment(
     val createdAt: String = "",
 )
 
+/** A big project / account initiative (plan 6.6): groups several opportunities under one account
+ *  effort and maps the stakeholders driving the decision. Value is never summed across currencies. */
+@Serializable
+data class Project(
+    val id: String,
+    val customerId: String = "",       // stable link to Customer.id
+    val customerName: String = "",     // display snapshot
+    val name: String = "",
+    val description: String = "",
+    val opportunityIds: List<String> = emptyList(),  // deals rolled into this project
+    val stakeholderIds: List<String> = emptyList(),   // ContactPerson.id driving the decision
+    val status: String = "ACTIVE",     // ProjectStatus
+    val targetDate: String = "",       // yyyy-MM-dd expected decision/close
+    val createdAt: String = "",
+)
+
+enum class ProjectStatus(val label: String, val labelEn: String) {
+    ACTIVE("نشط", "Active"),
+    WON("مكسوب", "Won"),
+    LOST("خاسر", "Lost"),
+    ON_HOLD("مؤجّل", "On hold"),
+    ;
+    fun label(en: Boolean) = if (en) labelEn else label
+}
+
+fun Project.statusEnum(): ProjectStatus =
+    runCatching { ProjectStatus.valueOf(status.trim().uppercase()) }.getOrDefault(ProjectStatus.ACTIVE)
+
+/** Combined value of the project's linked opportunities, split per currency (never summed across). */
+fun Project.valueByCurrency(opps: List<Opportunity>): Map<String, Double> =
+    opps.filter { it.id in opportunityIds }
+        .groupBy { it.currency.ifBlank { "—" } }
+        .mapValues { (_, list) -> list.sumOf { it.value } }
+
 /** Versioned portable payload used by the settings backup/import flow.
  *  New lists carry defaults so older backups (which lack them) still restore cleanly. */
 @Serializable
@@ -554,6 +588,7 @@ data class AppBackup(
     val products: List<ProductKnowledge> = emptyList(),
     val objections: List<Objection> = emptyList(),
     val attachments: List<Attachment> = emptyList(),
+    val projects: List<Project> = emptyList(),
 )
 
 /** Product matching (plan 6.1) — pure. Explains fit against a customer need; flags what's unverified. */
@@ -598,6 +633,7 @@ internal fun mergeBackups(local: AppBackup, remote: AppBackup): AppBackup = AppB
     products = (remote.products.associateBy { it.id } + local.products.associateBy { it.id }).values.toList(),
     objections = (remote.objections.associateBy { it.id } + local.objections.associateBy { it.id }).values.toList(),
     attachments = (remote.attachments.associateBy { it.id } + local.attachments.associateBy { it.id }).values.toList(),
+    projects = (remote.projects.associateBy { it.id } + local.projects.associateBy { it.id }).values.toList(),
 )
 
 internal fun checkCloudMerge() {
