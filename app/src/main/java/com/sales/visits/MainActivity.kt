@@ -7242,6 +7242,8 @@ private fun SettingsScreen(store: Store, account: CloudAccount?, onBack: () -> U
             }
         }
 
+        DriveSection(store)
+
         AiSection(store)
 
         BackupSection(store)
@@ -7482,6 +7484,43 @@ private fun UpdateSection() {
                         status = t["update_failed"]
                     } finally { busy = false }
                 }
+            }
+        }
+    }
+}
+
+/** Connect the user's Google Drive so attachments sync across devices for free (plan 6.3). */
+@Composable
+private fun DriveSection(store: Store) {
+    val t = LocalL.current
+    val c = LocalSales.current
+    val ctx = LocalContext.current
+    var connected by remember { mutableStateOf(DriveSync.isConnected(ctx)) }
+    var email by remember { mutableStateOf(DriveSync.connectedEmail(ctx)) }
+    val storageRepo = remember { StorageRepo(ctx.applicationContext, store) }
+
+    val signInLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        // GoogleSignIn stores the account; re-read the connection state regardless of resultCode.
+        connected = DriveSync.isConnected(ctx)
+        email = DriveSync.connectedEmail(ctx)
+        if (connected) {
+            Toast.makeText(ctx, t["drive_connected"], Toast.LENGTH_SHORT).show()
+            storageRepo.uploadPending()
+        }
+    }
+
+    GroupCard {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(AppIcons.Download, null, tint = c.ink2, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(t["drive_sync"], color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(if (connected) "${t["drive_connected_as"]} $email" else t["drive_sync_desc"], color = c.muted, fontSize = 12.sp, lineHeight = 16.sp)
+            }
+            if (connected) {
+                TextButton(onClick = { DriveSync.disconnect(ctx); connected = false; email = "" }) { Text(t["drive_disconnect"], color = c.lost) }
+            } else {
+                TextButton(onClick = { signInLauncher.launch(DriveSync.signInClient(ctx).signInIntent) }) { Text(t["drive_connect"], color = c.ink) }
             }
         }
     }

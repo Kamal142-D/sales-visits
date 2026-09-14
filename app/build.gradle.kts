@@ -13,8 +13,8 @@ android {
         applicationId = "com.visit.flow"
         minSdk = 26
         targetSdk = 34
-        versionCode = 12
-        versionName = "1.8.0"
+        versionCode = 13
+        versionName = "1.8.1"
     }
 
     signingConfigs {
@@ -87,7 +87,9 @@ dependencies {
     implementation(firebaseBom)
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
-    // Attachments (6.3) are stored on-device only — no Firebase Storage (paid Blaze) needed.
+    // Attachments (6.3): stored on-device; optional free cross-device sync via the user's Google
+    // Drive (drive.file scope) — no Firebase Storage / Blaze needed.
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
