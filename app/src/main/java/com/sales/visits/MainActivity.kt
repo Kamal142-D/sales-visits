@@ -261,7 +261,7 @@ fun App(store: Store) {
                     showProfileEditor && cloud != null -> ProfileEditorScreen(store, cloud) { showProfileEditor = false }
                     customerEditorOpen -> CustomerEditor(store, editingCustomer) { customerEditorOpen = false }
                     customerProfileOpen && profileCustomer != null -> CustomerProfileScreen(
-                        store, profileCustomer!!,
+                        store, profileCustomer!!, team = team,
                         onEdit = { editingCustomer = it; customerEditorOpen = true },
                         onBack = { customerProfileOpen = false },
                     )
@@ -1108,7 +1108,7 @@ private fun ContactsEditor(contacts: MutableList<ContactPerson>) {
 
 /** Read-oriented customer profile: all details + purchases (orders & total) + visit history. */
 @Composable
-private fun CustomerProfileScreen(store: Store, customer: Customer, onEdit: (Customer) -> Unit, onBack: () -> Unit) {
+private fun CustomerProfileScreen(store: Store, customer: Customer, team: CompanyRepository? = null, onEdit: (Customer) -> Unit, onBack: () -> Unit) {
     val c = LocalSales.current
     val t = LocalL.current
     val ctx = LocalContext.current
@@ -1352,6 +1352,26 @@ private fun CustomerProfileScreen(store: Store, customer: Customer, onEdit: (Cus
                             IconButton(onClick = { store.deleteAttachment(a.id) }, modifier = Modifier.size(28.dp)) {
                                 Icon(AppIcons.Delete, t["delete"], tint = c.faint, modifier = Modifier.size(16.dp))
                             }
+                        }
+                    }
+                }
+            }
+
+            // Share to team (6.2) — only when signed into a company.
+            if (team?.companyId != null) {
+                val shared = team.isCustomerShared(cust.id)
+                Card {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(AppIcons.People, null, tint = c.ink2, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(t["share_to_team"], color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text(if (shared) t["shared_with_team"] else t["share_to_team_desc"], color = c.muted, fontSize = 12.sp, lineHeight = 16.sp)
+                        }
+                        if (shared) {
+                            TextButton(onClick = { team.deleteTeamCustomer(cust.id) }) { Text(t["unshare"], color = c.lost) }
+                        } else {
+                            TextButton(onClick = { team.shareCustomer(cust) }) { Text(t["share"], color = c.ink) }
                         }
                     }
                 }
@@ -4056,12 +4076,15 @@ private fun TaskSheet(store: Store, editing: PlanItem?, date: String, onDismiss:
                 }
             }
 
-            // Add this follow-up to the device calendar (6.4 — works with any calendar app).
+            // Add to calendar (6.4). If Google Calendar is connected, create a real 2-way-synced event
+            // (edits/deletes follow); otherwise hand off to any calendar app via an intent.
             val calCtx = LocalContext.current
             Row(Modifier.padding(bottom = 8.dp)) {
                 ChoiceChip(t["add_to_calendar"], false) {
                     val title = listOf(client, action).filter { it.isNotBlank() }.joinToString(": ").ifBlank { t["tasks_tab"] }
-                    launchCalendarInsert(calCtx, title, action, date, time, minutes)
+                    val synced = editing != null && CalendarSync.isConnected(calCtx) && store.addTaskToCalendar(editing.id)
+                    if (synced) Toast.makeText(calCtx, t["cal_synced"], Toast.LENGTH_SHORT).show()
+                    else launchCalendarInsert(calCtx, title, action, date, time, minutes)
                 }
             }
 
@@ -6824,6 +6847,35 @@ private fun TeamScreen(team: CompanyRepository, account: CloudAccount, onBack: (
                     }
                 }
             }
+
+            // ---- Shared customers: the company-wide customer book (6.2) ----
+            Text("${t["team_customers"]} · ${team.teamCustomers.size}", color = c.muted, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 22.dp, end = 18.dp, top = 16.dp, bottom = 4.dp))
+            if (team.teamCustomers.isEmpty()) {
+                Text(t["team_customers_empty"], color = c.muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp))
+            } else {
+                Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    team.teamCustomers.forEach { tc ->
+                        Surface(shape = RoundedCornerShape(14.dp), color = c.surface, border = androidx.compose.foundation.BorderStroke(1.dp, c.edge)) {
+                            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(tc.name, color = c.ink, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    val sub = listOf(tc.city, tc.industry, tc.ownerName.ifBlank { null }?.let { "${t["owner"]}: $it" }).filterNotNull().filter { it.isNotBlank() }.joinToString(" · ")
+                                    if (sub.isNotBlank()) Text(sub, color = c.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                if (splitPhone(tc.phone).second.isNotBlank()) IconButton(onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + tc.phone.trim()))) } }, modifier = Modifier.size(28.dp)) {
+                                    Icon(AppIcons.Phone, t["call"], tint = c.ink2, modifier = Modifier.size(16.dp))
+                                }
+                                if (team.isManager || tc.ownerUid == myUid) {
+                                    IconButton(onClick = { team.deleteTeamCustomer(tc.id) }, modifier = Modifier.size(28.dp)) {
+                                        Icon(AppIcons.Delete, t["delete"], tint = c.faint, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Text(t["team_customers_hint"], color = c.faint, fontSize = 11.5.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 6.dp))
 
             if (assignOpen) AssignmentSheet(team, team.members) { assignOpen = false }
             if (shareOppOpen) ShareOppSheet { title, cust, value, cur ->

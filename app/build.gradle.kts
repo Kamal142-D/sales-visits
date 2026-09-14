@@ -13,8 +13,8 @@ android {
         applicationId = "com.visit.flow"
         minSdk = 26
         targetSdk = 34
-        versionCode = 14
-        versionName = "1.8.2"
+        versionCode = 15
+        versionName = "1.9.0"
     }
 
     signingConfigs {

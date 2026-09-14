@@ -37,6 +37,7 @@ class CompanyRepository(
     var members by mutableStateOf<List<TeamMember>>(emptyList()); private set
     var assignments by mutableStateOf<List<Assignment>>(emptyList()); private set
     var teamOpps by mutableStateOf<List<TeamOpp>>(emptyList()); private set   // shared company pipeline (6.2)
+    var teamCustomers by mutableStateOf<List<TeamCustomer>>(emptyList()); private set   // shared customer book (6.2)
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
 
@@ -45,6 +46,7 @@ class CompanyRepository(
     private var membersReg: ListenerRegistration? = null
     private var assignmentsReg: ListenerRegistration? = null
     private var teamOppsReg: ListenerRegistration? = null
+    private var teamCustomersReg: ListenerRegistration? = null
 
     private val authListener = FirebaseAuth.AuthStateListener { start() }
 
@@ -125,6 +127,22 @@ class CompanyRepository(
                     )
                 }.orEmpty().sortedByDescending { it.value }
             }
+        teamCustomersReg = db.collection("companies").document(cid).collection("customers")
+            .addSnapshotListener { snap, _ ->
+                teamCustomers = snap?.documents?.map {
+                    TeamCustomer(
+                        id = it.id,
+                        name = it.getString("name").orEmpty(),
+                        phone = it.getString("phone").orEmpty(),
+                        address = it.getString("address").orEmpty(),
+                        city = it.getString("city").orEmpty(),
+                        industry = it.getString("industry").orEmpty(),
+                        note = it.getString("note").orEmpty(),
+                        ownerUid = it.getString("ownerUid").orEmpty(),
+                        ownerName = it.getString("ownerName").orEmpty(),
+                    )
+                }.orEmpty().sortedBy { it.name }
+            }
     }
 
     private fun detachCompany() {
@@ -132,12 +150,13 @@ class CompanyRepository(
         membersReg?.remove(); membersReg = null
         assignmentsReg?.remove(); assignmentsReg = null
         teamOppsReg?.remove(); teamOppsReg = null
+        teamCustomersReg?.remove(); teamCustomersReg = null
     }
 
     private fun reset() {
         detachCompany()
         companyId = null; companyName = ""; inviteCode = ""; role = null
-        members = emptyList(); assignments = emptyList(); teamOpps = emptyList()
+        members = emptyList(); assignments = emptyList(); teamOpps = emptyList(); teamCustomers = emptyList()
     }
 
     /** Share an opportunity to the whole team (plan 6.2). Tagged with the sharer as ownerUid; the
@@ -157,6 +176,31 @@ class CompanyRepository(
     fun deleteTeamOpportunity(id: String) {
         val cid = companyId ?: return
         db.collection("companies").document(cid).collection("opportunities").document(id).delete()
+    }
+
+    /** Share a customer to the whole company (plan 6.2). Uses the customer's stable id as the doc id
+     *  so re-sharing the same customer updates it in place instead of duplicating. Tagged with the
+     *  sharer as ownerUid; the backend rules let only that owner (or a manager) edit/delete it. */
+    fun shareCustomer(customer: Customer) {
+        val cid = companyId ?: return
+        val uid = auth.currentUser?.uid ?: return
+        if (customer.name.isBlank()) return
+        db.collection("companies").document(cid).collection("customers").document(customer.id).set(mapOf(
+            "name" to customer.name.trim(), "phone" to customer.phone.trim(), "address" to customer.address.trim(),
+            "city" to customer.city.trim(), "industry" to customer.industry.trim(),
+            "note" to customer.notes.trim(), "ownerUid" to uid,
+            "ownerName" to (members.firstOrNull { it.uid == uid }?.name ?: ""),
+            "sharedAt" to FieldValue.serverTimestamp(),
+        ))
+    }
+
+    /** True once this customer id is in the shared company book. */
+    fun isCustomerShared(customerId: String): Boolean = teamCustomers.any { it.id == customerId }
+
+    /** Delete a shared customer — the backend allows only its owner or a manager. */
+    fun deleteTeamCustomer(id: String) {
+        val cid = companyId ?: return
+        db.collection("companies").document(cid).collection("customers").document(id).delete()
     }
 
     /** My own assigned work (what a rep sees on their plate). */

@@ -611,6 +611,7 @@ class Store(context: Context) {
             ) else it
         }
         persistTasks()
+        pushCalendar(id)   // 6.4: keep a synced calendar event in step with the edit
     }
 
     /** Sets a task's status (done/cancelled/postponed/open), stamping completion date and keeping the
@@ -629,6 +630,7 @@ class Store(context: Context) {
     fun rescheduleTask(id: String, date: String) {
         tasks = tasks.map { if (it.id == id) it.copy(date = date) else it }
         persistTasks()
+        pushCalendar(id)   // 6.4: move the synced calendar event too
     }
 
     fun toggleTask(id: String) {
@@ -637,8 +639,34 @@ class Store(context: Context) {
     }
 
     fun deleteTask(id: String) {
+        val ev = tasks.firstOrNull { it.id == id }?.calendarEventId.orEmpty()
         tasks = tasks.filter { it.id != id }
         persistTasks()
+        if (ev.isNotBlank() && CalendarSync.isConnected(appContext)) Thread { CalendarSync.delete(appContext, ev) }.start()
+    }
+
+    /** Adds a task to Google Calendar (6.4) and stores the event id so later edits/deletes sync.
+     *  Returns false (no-op) when Calendar isn't connected — the caller then uses the intent fallback. */
+    fun addTaskToCalendar(id: String): Boolean {
+        if (!CalendarSync.isConnected(appContext)) return false
+        val task = tasks.firstOrNull { it.id == id } ?: return false
+        val title = listOf(task.client, task.action).filter { it.isNotBlank() }.joinToString(": ").ifBlank { task.action }
+        Thread {
+            val ev = CalendarSync.create(appContext, title, task.action, task.date, task.time, task.minutes)
+            if (ev != null) {
+                tasks = tasks.map { if (it.id == id) it.copy(calendarEventId = ev) else it }
+                persistTasks()
+            }
+        }.start()
+        return true
+    }
+
+    /** Pushes a task's current details to its synced calendar event, if it has one and Calendar is on. */
+    private fun pushCalendar(id: String) {
+        val task = tasks.firstOrNull { it.id == id } ?: return
+        if (task.calendarEventId.isBlank() || !CalendarSync.isConnected(appContext)) return
+        val title = listOf(task.client, task.action).filter { it.isNotBlank() }.joinToString(": ").ifBlank { task.action }
+        Thread { CalendarSync.update(appContext, task.calendarEventId, title, task.action, task.date, task.time, task.minutes) }.start()
     }
 
     // ---- Inventory (stock + prices) ----

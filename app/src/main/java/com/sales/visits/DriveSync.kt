@@ -31,9 +31,11 @@ object DriveSync {
     private val SCOPE = Scope(SCOPE_STR)
 
     fun signInClient(ctx: Context): GoogleSignInClient {
+        // One Google connection grants both attachment sync (drive.file) and calendar sync
+        // (calendar.events) — see CalendarSync. Requesting both here avoids a second sign-in.
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
-            .requestScopes(SCOPE)
+            .requestScopes(SCOPE, Scope(CalendarSync.SCOPE_STR))
             .build()
         return GoogleSignIn.getClient(ctx, gso)
     }

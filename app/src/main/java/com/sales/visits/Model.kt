@@ -168,6 +168,20 @@ data class TeamOpp(
     val ownerName: String = "",
 )
 
+/** A customer shared to the whole company (plan 6.2) — visible to every member; editable by its
+ *  owner (the rep who shared it) or a manager, enforced by the backend rules. */
+data class TeamCustomer(
+    val id: String,
+    val name: String,
+    val phone: String = "",
+    val address: String = "",
+    val city: String = "",
+    val industry: String = "",
+    val note: String = "",
+    val ownerUid: String = "",
+    val ownerName: String = "",
+)
+
 /** A unit of work a manager assigns to a rep: a customer to visit (shared at company level). */
 data class Assignment(
     val id: String,
@@ -357,6 +371,7 @@ data class PlanItem(
     val status: String = "",       // TaskStatus — "" means fall back to the legacy `done` flag
     val completedAt: String = "",  // yyyy-MM-dd when marked done
     val result: String = "",       // free-text outcome of the follow-up
+    val calendarEventId: String = "", // Google Calendar event id once synced (plan 6.4) — enables 2-way
 )
 
 /** Resolved status: honors the new `status` field, falling back to the legacy `done` boolean. */

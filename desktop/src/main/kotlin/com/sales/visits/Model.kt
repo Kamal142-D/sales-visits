@@ -122,6 +122,7 @@ data class PlanItem(
     val status: String = "",
     val completedAt: String = "",
     val result: String = "",
+    val calendarEventId: String = "",
 )
 
 /** Stock item (round-tripped for cloud sync with the Android app). */
