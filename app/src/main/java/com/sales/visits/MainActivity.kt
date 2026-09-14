@@ -1992,6 +1992,7 @@ private fun quoteNumText(d: Double): String = if (d == d.toLong().toDouble()) d.
 private fun QuoteEditor(store: Store, customer: Customer, editing: Quote?, onClose: () -> Unit) {
     val c = LocalSales.current
     val t = LocalL.current
+    val ctx = LocalContext.current
     val isLockedOriginal = editing != null && quoteStatusEnum(editing.status) != QuoteStatus.DRAFT
     var status by remember { mutableStateOf(quoteStatusEnum(editing?.status)) }
     var currency by remember { mutableStateOf((editing?.currency ?: "").ifBlank { store.defaultCurrency }) }
@@ -2073,6 +2074,7 @@ private fun QuoteEditor(store: Store, customer: Customer, editing: Quote?, onClo
                             Box(Modifier.weight(1f)) { LabeledBlock(t["quote_qty"]) { Input(quoteNumText(ln.quantity), { lines[i] = lines[i].copy(quantity = it.filter { ch -> ch.isDigit() || ch == '.' }.toDoubleOrNull() ?: 0.0) }, "1", kb = KeyboardType.Number) } }
                             Box(Modifier.weight(1f)) { LabeledBlock(t["quote_unit_price"]) { Input(quoteNumText(ln.unitPrice), { lines[i] = lines[i].copy(unitPrice = it.filter { ch -> ch.isDigit() || ch == '.' }.toDoubleOrNull() ?: 0.0) }, "0", kb = KeyboardType.Number) } }
                             Box(Modifier.weight(1f)) { LabeledBlock(t["quote_discount"]) { Input(quoteNumText(ln.discountPct), { lines[i] = lines[i].copy(discountPct = it.filter { ch -> ch.isDigit() || ch == '.' }.toDoubleOrNull() ?: 0.0) }, "0", kb = KeyboardType.Number) } }
+                            Box(Modifier.weight(1f)) { LabeledBlock(t["quote_unit_cost"]) { Input(quoteNumText(ln.unitCost), { lines[i] = lines[i].copy(unitCost = it.filter { ch -> ch.isDigit() || ch == '.' }.toDoubleOrNull() ?: 0.0) }, "0", kb = KeyboardType.Number) } }
                         }
                         Text("${t["quote_line_net"]}: ${fmtMoney(QuoteMath.lineNet(ln))} ${currency.trim()}", color = c.muted, fontSize = 12.sp)
                     }
@@ -2090,6 +2092,14 @@ private fun QuoteEditor(store: Store, customer: Customer, editing: Quote?, onClo
                     QuoteTotalRow("${t["quote_tax"]} (${quoteNumText(preview.taxPct)}%)", "${fmtMoney(QuoteMath.tax(preview))} ${currency.trim()}", c.ink2)
                     Spacer(Modifier.height(4.dp))
                     QuoteTotalRow(t["quote_total"], "${fmtMoney(QuoteMath.total(preview))} ${currency.trim()}", c.ink, bold = true)
+                    // Profit margin — only when a cost was entered on some line (internal view; never printed for the customer).
+                    if (QuoteMath.hasCost(preview)) {
+                        Spacer(Modifier.height(6.dp))
+                        HorizontalDivider(color = c.edge)
+                        Spacer(Modifier.height(6.dp))
+                        QuoteTotalRow(t["quote_cost"], "${fmtMoney(QuoteMath.cost(preview))} ${currency.trim()}", c.muted)
+                        QuoteTotalRow("${t["quote_profit"]} (${quoteNumText(QuoteMath.marginPct(preview))}%)", "${fmtMoney(QuoteMath.profit(preview))} ${currency.trim()}", if (QuoteMath.profit(preview) >= 0) c.ok else c.lost, bold = true)
+                    }
                 }
             }
 
@@ -2102,6 +2112,26 @@ private fun QuoteEditor(store: Store, customer: Customer, editing: Quote?, onClo
                 Surface(onClick = { store.createOrderFromQuote(editing); onClose() }, shape = RoundedCornerShape(14.dp), color = c.ink, modifier = Modifier.fillMaxWidth().height(50.dp)) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(t["quote_make_order"], color = c.onInk, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+            }
+
+            // Export the quote as a PDF to share with the customer (cost/profit stay internal, never printed).
+            if (lines.isNotEmpty()) {
+                Surface(
+                    onClick = {
+                        val f = QuotePdf.build(ctx, preview, customer, company = "", en = t.en)
+                        if (f != null) QuotePdf.share(ctx, f, t["quote_export_pdf"])
+                        else Toast.makeText(ctx, t["quote_pdf_failed"], Toast.LENGTH_SHORT).show()
+                    },
+                    shape = RoundedCornerShape(14.dp), color = c.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, c.edge),
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(50.dp),
+                ) {
+                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                        Icon(AppIcons.Report, null, tint = c.ink2, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(t["quote_export_pdf"], color = c.ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
                 }
             }
@@ -4914,15 +4944,17 @@ private fun ToolsScreen(
         "knowledge" -> ProductKnowledgeScreen(store) { sub = null }
         "objections" -> ObjectionsScreen(store) { sub = null }
         "projects" -> ProjectsScreen(store) { sub = null }
-        else -> ToolsHub(onBack, onStock = { sub = "stock" }, onPrices = { sub = "prices" }, onMail = { sub = "mail" }, onInsights, onOpps, onTeam, onAsk = { sub = "ask" }, onAnalytics = { sub = "analytics" }, onWeekly = { sub = "weekly" }, onLost = { sub = "lost" }, onKnowledge = { sub = "knowledge" }, onObjections = { sub = "objections" }, onProjects = { sub = "projects" })
+        "linking" -> NeedsLinkingScreen(store) { sub = null }
+        else -> ToolsHub(store, onBack, onStock = { sub = "stock" }, onPrices = { sub = "prices" }, onMail = { sub = "mail" }, onInsights, onOpps, onTeam, onAsk = { sub = "ask" }, onAnalytics = { sub = "analytics" }, onWeekly = { sub = "weekly" }, onLost = { sub = "lost" }, onKnowledge = { sub = "knowledge" }, onObjections = { sub = "objections" }, onProjects = { sub = "projects" }, onLinking = { sub = "linking" })
     }
 }
 
 @Composable
 private fun ToolsHub(
+    store: Store,
     onBack: () -> Unit, onStock: () -> Unit, onPrices: () -> Unit, onMail: () -> Unit,
     onInsights: () -> Unit, onOpps: () -> Unit, onTeam: (() -> Unit)?, onAsk: () -> Unit, onAnalytics: () -> Unit, onWeekly: () -> Unit, onLost: () -> Unit,
-    onKnowledge: () -> Unit, onObjections: () -> Unit, onProjects: () -> Unit,
+    onKnowledge: () -> Unit, onObjections: () -> Unit, onProjects: () -> Unit, onLinking: () -> Unit,
 ) {
     val c = LocalSales.current
     val t = LocalL.current
@@ -4950,6 +4982,11 @@ private fun ToolsHub(
             HorizontalDivider(color = c.edge)
             SettingsRow(AppIcons.Map, t["projects"]) { onProjects() }
             HorizontalDivider(color = c.edge)
+            val unlinked = store.unlinkedNames()
+            if (unlinked.isNotEmpty()) {
+                SettingsRow(AppIcons.PersonAdd, t["needs_linking"], value = unlinked.size.toString()) { onLinking() }
+                HorizontalDivider(color = c.edge)
+            }
             SettingsRow(AppIcons.Search, t["ask_data"]) { onAsk() }
             if (onTeam != null) {
                 HorizontalDivider(color = c.edge)
@@ -5699,6 +5736,53 @@ private fun ProjectSheet(store: Store, editing: Project?, onDismiss: () -> Unit)
     if (showDate) DatePick(targetDate.ifBlank { todayIso() }) { targetDate = it; showDate = false }
 }
 
+/** "Needs linking" (plan 1.6): records the migration left unlinked because the name was ambiguous or
+ *  free-text. Pick the right customer to link every matching record at once. */
+@Composable
+private fun NeedsLinkingScreen(store: Store, onBack: () -> Unit) {
+    val c = LocalSales.current
+    val t = LocalL.current
+    BackHandler(onBack = onBack)
+    var picking by remember { mutableStateOf<String?>(null) }
+    val unlinked = store.unlinkedNames()
+    Box(Modifier.fillMaxSize().background(c.bg)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 10.dp, end = 22.dp, top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircleBtn(if (t.en) AppIcons.ArrowBack else AppIcons.ArrowForward, t["done"]) { onBack() }
+                Spacer(Modifier.width(12.dp))
+                Text(t["needs_linking"], fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink)
+            }
+            Text(t["needs_linking_desc"], color = c.muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 4.dp))
+            if (unlinked.isEmpty()) Card { Text(t["needs_linking_none"], color = c.muted, fontSize = 13.5.sp) }
+            else unlinked.forEach { (name, count) ->
+                Card {
+                    Row(Modifier.fillMaxWidth().clickable { picking = name }, verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(name, color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(2.dp))
+                            Text("$count ${t["needs_linking_records"]}", color = c.muted, fontSize = 12.5.sp)
+                        }
+                        Surface(shape = RoundedCornerShape(999.dp), color = c.ink) {
+                            Text(t["needs_linking_link"], Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = c.onInk, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(80.dp))
+        }
+    }
+    picking?.let { name ->
+        CustomerPickerSheet(
+            store = store, initialQuery = name,
+            onPick = { picked ->
+                store.customerFor(picked)?.let { store.linkNameToCustomer(name, it.id) }
+                picking = null
+            },
+            onDismiss = { picking = null },
+        )
+    }
+}
+
 /** Compose an email (recipient from customer contacts) and hand it to the device's email app. */
 @Composable
 private fun MailScreen(store: Store, onBack: () -> Unit) {
@@ -6149,6 +6233,7 @@ private fun OpportunitiesScreen(store: Store, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     var editing by remember { mutableStateOf<Opportunity?>(null) }
     var sheetOpen by remember { mutableStateOf(false) }
+    var board by remember { mutableStateOf(false) }   // list vs Kanban board
     val opps = store.opportunities
     var filter by remember { mutableStateOf("ALL") }   // ALL | ACTIVE | WON | LOST | POSTPONED
     val openValue = opps.filter { it.stageEnum().isActive }.sumOf { it.value }
@@ -6171,7 +6256,8 @@ private fun OpportunitiesScreen(store: Store, onBack: () -> Unit) {
             ) {
                 CircleBtn(if (t.en) AppIcons.ArrowBack else AppIcons.ArrowForward, t["done"]) { onBack() }
                 Spacer(Modifier.width(12.dp))
-                Text(t["opportunities"], fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink)
+                Text(t["opportunities"], fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink, modifier = Modifier.weight(1f))
+                if (opps.isNotEmpty()) CircleBtn(if (board) AppIcons.Report else AppIcons.Chart, t["opp_view_toggle"]) { board = !board }
             }
 
             if (opps.isEmpty()) {
@@ -6204,17 +6290,43 @@ private fun OpportunitiesScreen(store: Store, onBack: () -> Unit) {
                     listOf("ALL" to t["all"], "ACTIVE" to t["opp_active"], "WON" to t["stage_won"], "LOST" to t["stage_lost"], "POSTPONED" to t["stage_postponed"])
                         .forEach { (key, label) -> ChoiceChip(label, filter == key) { filter = key } }
                 }
-                // Pipeline: grouped by stage.
-                OppStage.values().forEach { stage ->
-                    val group = shown.filter { it.stageEnum() == stage }
-                    if (group.isNotEmpty()) {
-                        Row(Modifier.padding(start = 22.dp, end = 22.dp, top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(8.dp).clip(CircleShape).background(oppStageColor(stage)))
-                            Spacer(Modifier.width(8.dp))
-                            Text("${stage.label(t.en)} · ${group.size}", color = c.muted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                if (board) {
+                    // Kanban board: one column per stage (that has cards), scrolls horizontally.
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        OppStage.values().forEach { stage ->
+                            val group = shown.filter { it.stageEnum() == stage }
+                            if (group.isNotEmpty()) {
+                                Column(Modifier.width(240.dp)) {
+                                    Row(Modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Box(Modifier.size(8.dp).clip(CircleShape).background(oppStageColor(stage)))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("${stage.label(t.en)} · ${group.size}", color = c.ink2, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    val stageValue = group.sumOf { it.value }
+                                    if (stageValue > 0) Text(fmtMoney(stageValue), color = c.muted, fontSize = 11.5.sp, modifier = Modifier.padding(bottom = 8.dp))
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        group.forEach { o -> OpportunityRow(o) { editing = o; sheetOpen = true } }
+                                    }
+                                }
+                            }
                         }
-                        Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            group.forEach { o -> OpportunityRow(o) { editing = o; sheetOpen = true } }
+                    }
+                } else {
+                    // Pipeline: grouped by stage.
+                    OppStage.values().forEach { stage ->
+                        val group = shown.filter { it.stageEnum() == stage }
+                        if (group.isNotEmpty()) {
+                            Row(Modifier.padding(start = 22.dp, end = 22.dp, top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(8.dp).clip(CircleShape).background(oppStageColor(stage)))
+                                Spacer(Modifier.width(8.dp))
+                                Text("${stage.label(t.en)} · ${group.size}", color = c.muted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                group.forEach { o -> OpportunityRow(o) { editing = o; sheetOpen = true } }
+                            }
                         }
                     }
                 }

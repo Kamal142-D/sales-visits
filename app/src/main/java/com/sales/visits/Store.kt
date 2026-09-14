@@ -366,6 +366,32 @@ class Store(context: Context) {
         .filter { it.next.isNotBlank() && it.nextDate.isNotBlank() && it.nextDate <= todayIso() }
         .sortedBy { it.nextDate }
 
+    // ---- Needs linking (plan 1.6): records whose customerId is blank (ambiguous/free-text name) ----
+    /** Distinct free-text names still not linked to a customer, with how many records carry each. */
+    fun unlinkedNames(): List<Pair<String, Int>> {
+        val names = mutableMapOf<String, Int>()
+        fun add(name: String) { val n = name.trim(); if (n.isNotBlank()) names[n] = (names[n] ?: 0) + 1 }
+        visits.filter { it.customerId.isBlank() }.forEach { add(it.client) }
+        orders.filter { it.customerId.isBlank() }.forEach { add(it.customerName) }
+        opportunities.filter { it.customerId.isBlank() }.forEach { add(it.customerName) }
+        plan.filter { it.customerId.isBlank() }.forEach { add(it.client) }
+        tasks.filter { it.customerId.isBlank() }.forEach { add(it.client) }
+        return names.entries.sortedByDescending { it.value }.map { it.key to it.value }
+    }
+
+    /** Links every unlinked record whose name matches [name] to [customerId], adopting the customer's
+     *  canonical name. Idempotent — records already linked are untouched. */
+    fun linkNameToCustomer(name: String, customerId: String) {
+        val cust = customerById(customerId) ?: return
+        val key = customerKey(name)
+        visits = visits.map { if (it.customerId.isBlank() && customerKey(it.client) == key) it.copy(customerId = customerId, client = cust.name) else it }
+        orders = orders.map { if (it.customerId.isBlank() && customerKey(it.customerName) == key) it.copy(customerId = customerId, customerName = cust.name) else it }
+        opportunities = opportunities.map { if (it.customerId.isBlank() && customerKey(it.customerName) == key) it.copy(customerId = customerId, customerName = cust.name) else it }
+        plan = plan.map { if (it.customerId.isBlank() && customerKey(it.client) == key) it.copy(customerId = customerId, client = cust.name) else it }
+        tasks = tasks.map { if (it.customerId.isBlank() && customerKey(it.client) == key) it.copy(customerId = customerId, client = cust.name) else it }
+        persist(); persistOrders(); persistOpportunities(); persistPlan(); persistTasks()
+    }
+
     // ---- Portable backup ----
 
     private fun snapshot(exportedAt: String) = AppBackup(

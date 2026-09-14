@@ -1,6 +1,6 @@
 {
-  "versionCode": 13,
-  "versionName": "1.8.1",
+  "versionCode": 14,
+  "versionName": "1.8.2",
   "apkUrl": "https://raw.githubusercontent.com/Kamal142-D/sales-visits/main/app-release.apk",
-  "notes": "VisitFlow 1.8.1: مزامنة المرفقات بين الأجهزة مجاناً عبر Google Drive (اربط حسابك من الإعدادات)، بالإضافة للمشاريع وخريطة الحساب وكرت تفاصيل المهمة."
+  "notes": "VisitFlow 1.8.2: لوحة Kanban للفرص، تصدير عرض السعر PDF، هامش الربح في العروض (بإدخال التكلفة)، وشاشة «يحتاج ربط» للأسماء غير المربوطة."
 }

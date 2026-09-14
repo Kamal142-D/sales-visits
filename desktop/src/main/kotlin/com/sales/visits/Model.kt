@@ -220,6 +220,7 @@ data class QuoteLine(
     val unit: String = "",
     val unitPrice: Double = 0.0,
     val discountPct: Double = 0.0,
+    val unitCost: Double = 0.0,
 )
 
 /** Price quote (round-tripped for cloud sync). */

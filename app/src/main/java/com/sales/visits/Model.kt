@@ -439,6 +439,7 @@ data class QuoteLine(
     val unit: String = "",
     val unitPrice: Double = 0.0,
     val discountPct: Double = 0.0,   // per-line discount, 0..100
+    val unitCost: Double = 0.0,      // your cost per unit (optional) — drives the profit margin
 )
 
 /** A price quote — a record of what was offered, with line items and a status. */
@@ -483,6 +484,21 @@ object QuoteMath {
     fun subtotal(q: Quote): Double = round2(q.lines.sumOf { lineNet(it) })
     fun tax(q: Quote): Double = round2(subtotal(q) * (q.taxPct.coerceAtLeast(0.0) / 100.0))
     fun total(q: Quote): Double = round2(subtotal(q) + tax(q))
+
+    /** Total cost across lines that have a cost entered (lines with no cost contribute 0). */
+    fun cost(q: Quote): Double = round2(q.lines.sumOf { round2(it.quantity * it.unitCost) })
+
+    /** Profit = subtotal (before tax) − total cost. Only meaningful when some costs are entered. */
+    fun profit(q: Quote): Double = round2(subtotal(q) - cost(q))
+
+    /** True once at least one line carries a cost, so margin figures are worth showing. */
+    fun hasCost(q: Quote): Boolean = q.lines.any { it.unitCost > 0.0 }
+
+    /** Profit margin on the pre-tax subtotal, as a percentage (0 when subtotal is 0). */
+    fun marginPct(q: Quote): Double {
+        val sub = subtotal(q)
+        return if (sub <= 0.0) 0.0 else round2(profit(q) / sub * 100.0)
+    }
 }
 
 /**

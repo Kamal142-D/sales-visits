@@ -48,6 +48,10 @@ object QuoteMath {
     fun subtotal(q: Quote): Double = round2(q.lines.sumOf { lineNet(it) })
     fun tax(q: Quote): Double = round2(subtotal(q) * (q.taxPct.coerceAtLeast(0.0) / 100.0))
     fun total(q: Quote): Double = round2(subtotal(q) + tax(q))
+    fun cost(q: Quote): Double = round2(q.lines.sumOf { round2(it.quantity * it.unitCost) })
+    fun profit(q: Quote): Double = round2(subtotal(q) - cost(q))
+    fun hasCost(q: Quote): Boolean = q.lines.any { it.unitCost > 0.0 }
+    fun marginPct(q: Quote): Double { val s = subtotal(q); return if (s <= 0.0) 0.0 else round2(profit(q) / s * 100.0) }
 }
 
 enum class TaskStatus(val label: String, val labelEn: String) {
