@@ -1,6 +1,6 @@
 {
-  "versionCode": 15,
-  "versionName": "1.9.0",
+  "versionCode": 16,
+  "versionName": "1.9.1",
   "apkUrl": "https://raw.githubusercontent.com/Kamal142-D/sales-visits/main/app-release.apk",
-  "notes": "VisitFlow 1.9.0: مشاركة العملاء مع الفريق (6.2)، ومزامنة التقويم ثنائية الاتجاه عبر Google Calendar (6.4) — المهمة بتتحط كحدث ويتحدّث/يتحذف لوحده مع تعديلها."
+  "notes": "VisitFlow 1.9.1: تنظيم صفحة الإعدادات بأقسام واضحة، وتغيير خط الواجهة إلى Inter."
 }

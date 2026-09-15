@@ -7374,13 +7374,19 @@ private fun SettingsScreen(store: Store, account: CloudAccount?, onBack: () -> U
             Text(t["settings"], fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink)
         }
 
+        // ---- Appearance ----
+        SettingsHeader(t["set_appearance"])
         GroupCard {
             ThemeSwitchRow()
             HorizontalDivider(color = c.edge)
             SettingsRow(AppIcons.Palette, t["color_style"], value = t["palette_${store.palette}"]) { sheet = "colorstyle" }
             HorizontalDivider(color = c.edge)
             SettingsRow(AppIcons.Language, t["language"], value = t["lang_${store.langMode}"]) { sheet = "language" }
-            HorizontalDivider(color = c.edge)
+        }
+
+        // ---- Preferences ----
+        SettingsHeader(t["set_preferences"])
+        GroupCard {
             SettingsRow(AppIcons.Calendar, t["week_start"], value = t["day_${store.weekStartDay.take(3).lowercase()}"]) { sheet = "week" }
             HorizontalDivider(color = c.edge)
             SettingsRow(AppIcons.Report, t["report_lang"], value = t["lang_${store.reportLang}"]) { sheet = "reportlang" }
@@ -7389,35 +7395,41 @@ private fun SettingsScreen(store: Store, account: CloudAccount?, onBack: () -> U
             HorizontalDivider(color = c.edge)
             SettingsRow(AppIcons.Chart, t["default_currency"], value = store.defaultCurrency) { sheet = "currency" }
             HorizontalDivider(color = c.edge)
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(AppIcons.Plan, null, tint = c.ink2, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(t["smart_automation"], color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text(t["smart_automation"], color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Text(t["smart_automation_desc"], color = c.muted, fontSize = 12.sp, lineHeight = 16.sp)
                 }
+                Spacer(Modifier.width(8.dp))
                 Switch(checked = store.smartAutomation, onCheckedChange = { store.chooseSmartAutomation(it) })
             }
         }
 
+        // ---- Account & sync ----
+        SettingsHeader(t["set_account"])
         if (account?.user != null) {
             GroupCard {
                 SettingsRow(AppIcons.Update, t["cloud_sync"], value = t["sync_${account.syncState}"]) {}
             }
         }
-
         DriveSection(store)
 
+        // ---- AI ----
+        SettingsHeader(t["set_ai"])
         AiSection(store)
 
+        // ---- Data & backup ----
+        SettingsHeader(t["set_data"])
         BackupSection(store)
-
-        UpdateSection()
-
         GroupCard {
             SettingsRow(AppIcons.Delete, t["delete_all"], danger = true) { confirmClear = true }
         }
 
+        // ---- Updates & about ----
+        SettingsHeader(t["set_updates"])
+        UpdateSection()
         GroupCard {
             SettingsRow(AppIcons.Info, t["about"], value = "${t["version"]} ${AppUpdater.currentVersionName(ctx)}") {}
         }
@@ -7527,8 +7539,7 @@ private fun AiSection(store: Store) {
     var testing by remember { mutableStateOf(false) }
 
     GroupCard {
-        Text(t["ai_formatting"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp))
-        Text(t["ai_desc"], fontSize = 12.5.sp, color = c.muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        Text(t["ai_desc"], fontSize = 12.5.sp, color = c.muted, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp))
         Column(Modifier.padding(horizontal = 16.dp)) {
             Text(t["api_key"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 7.dp))
             TextField(
@@ -7598,8 +7609,7 @@ private fun BackupSection(store: Store) {
     }
 
     GroupCard {
-        Text(t["backup"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp))
-        Text(t["backup_desc"], fontSize = 12.5.sp, color = c.muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        Text(t["backup_desc"], fontSize = 12.5.sp, color = c.muted, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp))
         SettingsRow(AppIcons.Upload, t["export_backup"]) {
             exportLauncher.launch("sales-visits-${todayIso()}.json")
         }
@@ -7746,6 +7756,16 @@ private fun GroupCard(content: @Composable ColumnScope.() -> Unit) {
 private fun SectionTitle(t: String) {
     val c = LocalSales.current
     Text(t, fontSize = 13.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
+}
+
+/** A grouped-list section header (iOS-style), sits above a GroupCard in the Settings screen. */
+@Composable
+private fun SettingsHeader(title: String) {
+    val c = LocalSales.current
+    Text(
+        title.uppercase(), color = c.muted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp,
+        modifier = Modifier.fillMaxWidth().padding(start = 30.dp, end = 22.dp, top = 20.dp, bottom = 2.dp),
+    )
 }
 
 @Composable

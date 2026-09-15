@@ -34,6 +34,19 @@ val GoogleSansFlexFont = FontFamily(
     Font(R.font.google_sans_flex, FontWeight.ExtraBold),
 )
 
+/**
+ * Inter (variable) — the app UI font. Inter is Latin-only (no Arabic glyphs), so Arabic text is
+ * rendered by the platform's Arabic fallback font automatically; Latin/English text uses Inter.
+ */
+val InterFont = FontFamily(
+    Font(R.font.inter, FontWeight.Normal),
+    Font(R.font.inter, FontWeight.Medium),
+    Font(R.font.inter, FontWeight.SemiBold),
+    Font(R.font.inter, FontWeight.Bold),
+    Font(R.font.inter, FontWeight.ExtraBold),
+    Font(R.font.inter, FontWeight.Black),
+)
+
 val LocalAppFont = staticCompositionLocalOf { ThmanyahTextFont }
 val LocalDisplayFont = staticCompositionLocalOf { ThmanyahDisplayFont }
 
@@ -187,8 +200,9 @@ fun SalesTheme(dark: Boolean, en: Boolean, palette: String, content: @Composable
         dark -> DarkSales
         else -> LightSales
     }
-    val bodyFont = if (en) GoogleSansFlexFont else ThmanyahTextFont
-    val displayFont = if (en) GoogleSansFlexFont else ThmanyahDisplayFont
+    // Inter for both languages (Latin renders in Inter; Arabic uses the system fallback font).
+    val bodyFont = InterFont
+    val displayFont = InterFont
     val scheme = if (dark) darkColorScheme(
         background = sales.bg, surface = sales.surface, onBackground = sales.ink,
         onSurface = sales.ink, primary = sales.ink, onPrimary = sales.onInk,
