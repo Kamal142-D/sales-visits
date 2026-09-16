@@ -42,6 +42,12 @@ class Store(context: Context) {
     var aiModel by mutableStateOf(sp.getString("ai_model", "gemini-2.5-flash") ?: "gemini-2.5-flash")
         private set
 
+    // OpenAI powers the agentic Assistant tab (separate from the Gemini key used for note formatting).
+    var openAiKey by mutableStateOf(sp.getString("openai_key", "") ?: "")
+        private set
+    var openAiModel by mutableStateOf(sp.getString("openai_model", "gpt-4o-mini") ?: "gpt-4o-mini")
+        private set
+
     var weekStartDay by mutableStateOf(sp.getString("week_start", "SATURDAY") ?: "SATURDAY")
         private set
 
@@ -1032,6 +1038,16 @@ class Store(context: Context) {
     fun chooseAiModel(value: String) {
         aiModel = value.trim().ifBlank { "gemini-2.5-flash" }
         sp.edit().putString("ai_model", aiModel).apply()
+    }
+
+    fun chooseOpenAiKey(value: String) {
+        openAiKey = value.trim()
+        sp.edit().putString("openai_key", openAiKey).apply()
+    }
+
+    fun chooseOpenAiModel(value: String) {
+        openAiModel = value.trim().ifBlank { "gpt-4o-mini" }
+        sp.edit().putString("openai_model", openAiModel).apply()
     }
 
     // Runs past the editor's lifetime so formatting finishes even after the screen closes.

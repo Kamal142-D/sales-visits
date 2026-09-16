@@ -40,7 +40,7 @@ import java.util.Locale
  */
 
 /** Compact, locally-computed facts about the rep's day/pipeline — the only thing the model may use. */
-private fun assistantFacts(store: Store, en: Boolean): String = buildString {
+internal fun assistantFacts(store: Store, en: Boolean): String = buildString {
     val today = todayIso()
     appendLine("Today is $today.")
     val plan = store.planFor(today)

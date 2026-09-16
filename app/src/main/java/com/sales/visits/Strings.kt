@@ -613,6 +613,9 @@ private val AR_MAP = mapOf(
     "ai_formatting" to "تنسيق الملاحظات بالذكاء الاصطناعي",
     "ai_desc" to "اكتب أو أملِ ملاحظات الزيارة بشكل عادي، والتطبيق ينسّقها احترافيًا بالعربي والإنجليزي. محتاج مفتاح Gemini مجاني.",
     "api_key" to "مفتاح Gemini API",
+    "openai_desc" to "تبويب «المساعد» بيشتغل بـOpenAI — بيجاوبك وينفّذ مهام (يضيف/ينقل متابعة) بعد تأكيدك. محتاج مفتاح OpenAI.",
+    "openai_key" to "مفتاح OpenAI API",
+    "get_openai_key" to "احصل على مفتاح OpenAI",
     "api_key_hint" to "الصق المفتاح هنا",
     "get_key" to "احصل على مفتاح مجاني من Google AI Studio",
     "ai_test" to "اختبار المفتاح",
@@ -644,6 +647,16 @@ private val AR_MAP = mapOf(
     "voice_didnt_catch" to "معرفتش أسمعك، جرّب تاني.",
     "voice_unavailable" to "التعرّف على الصوت مش متاح على الجهاز ده.",
     "voice_need_mic" to "محتاج إذن الميكروفون علشان أسمعك.",
+    "assistant_tab" to "المساعد",
+    "send" to "إرسال",
+    "agent_placeholder" to "اسأل أو اطلب مهمة…",
+    "agent_intro" to "أنا مساعدك — اسألني عن يومك أو خليني أضيف/أنقل متابعة.",
+    "agent_examples" to "«عندي إيه النهاردة؟» · «ضيف متابعة لأحمد بكرة الساعة ١٠»",
+    "agent_thinking" to "بيفكّر…",
+    "agent_clear" to "مسح",
+    "agent_need_key" to "محتاج مفتاح OpenAI — ضيفه من الإعدادات.",
+    "agent_bad_key" to "مفتاح OpenAI غير صحيح.",
+    "agent_rate" to "طلبات كتير على OpenAI، جرّب بعد شوية.",
 )
 
 private val EN_MAP = mapOf(
@@ -1252,6 +1265,9 @@ private val EN_MAP = mapOf(
     "ai_formatting" to "AI note formatting",
     "ai_desc" to "Write or dictate your visit notes casually, and the app formats them professionally in Arabic and English. Needs a free Gemini key.",
     "api_key" to "Gemini API key",
+    "openai_desc" to "The Assistant tab is powered by OpenAI — it answers and can do tasks (add/move a follow-up) after you confirm. Needs an OpenAI key.",
+    "openai_key" to "OpenAI API key",
+    "get_openai_key" to "Get an OpenAI key",
     "api_key_hint" to "Paste your key here",
     "get_key" to "Get a free key from Google AI Studio",
     "ai_test" to "Test key",
@@ -1283,6 +1299,16 @@ private val EN_MAP = mapOf(
     "voice_didnt_catch" to "Didn't catch that, try again.",
     "voice_unavailable" to "Speech recognition isn't available on this device.",
     "voice_need_mic" to "I need microphone permission to hear you.",
+    "assistant_tab" to "Assistant",
+    "send" to "Send",
+    "agent_placeholder" to "Ask, or ask me to do something…",
+    "agent_intro" to "I'm your assistant — ask about your day, or have me add/move a follow-up.",
+    "agent_examples" to "\"What's on today?\" · \"Add a follow-up with Ahmed tomorrow 10am\"",
+    "agent_thinking" to "Thinking…",
+    "agent_clear" to "Clear",
+    "agent_need_key" to "Needs an OpenAI key — add it in Settings.",
+    "agent_bad_key" to "That OpenAI key isn't valid.",
+    "agent_rate" to "OpenAI is rate-limiting; try again shortly.",
 )
 
 val AR = L(false, AR_MAP)
