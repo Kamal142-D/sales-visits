@@ -4160,6 +4160,7 @@ private fun TodayScreen(
     var showCalendar by remember { mutableStateOf(false) }
     var detailItem by remember { mutableStateOf<PlanItem?>(null) }
     var taskDetail by remember { mutableStateOf<PlanItem?>(null) }
+    var voiceOpen by remember { mutableStateOf(false) }
     val visitsToday = store.visitsOn(selectedDate)
 
     FrostedScaffold(header = {
@@ -4173,6 +4174,9 @@ private fun TodayScreen(
                 }
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { voiceOpen = true }) {
+                        Icon(AppIcons.Mic, t["voice_assistant"], tint = c.muted)
+                    }
                     IconButton(onClick = { showCalendar = !showCalendar }) {
                         Icon(AppIcons.Calendar, t["calendar"], tint = if (showCalendar) c.ink else c.muted)
                     }
@@ -4443,6 +4447,8 @@ private fun TodayScreen(
             onDismiss = { detailItem = null },
         )
     }
+
+    if (voiceOpen) VoiceAssistantSheet(store) { voiceOpen = false }
 
     // Tapping a task in the daily agenda (overdue / due-today / decisions) opens the same detail card.
     taskDetail?.let { picked ->

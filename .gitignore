@@ -21,3 +21,6 @@ Icons/
 # Firebase emulator debug logs
 firestore-debug.log
 firebase-debug.log
+
+# Cloned reference project (MIT) — not part of our app
+mural/

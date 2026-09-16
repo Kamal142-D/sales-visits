@@ -1,6 +1,6 @@
 {
-  "versionCode": 18,
-  "versionName": "1.9.3",
+  "versionCode": 19,
+  "versionName": "1.10.0",
   "apkUrl": "https://raw.githubusercontent.com/Kamal142-D/sales-visits/main/app-release.apk",
-  "notes": "VisitFlow 1.9.3: إزالة تاب «المهام» من البار السفلي (المهام لسه بتظهر في أجندة اليوم)."
+  "notes": "VisitFlow 1.10.0: مساعد صوتي — اتكلم واسأل عن يومك وبياناتك والتطبيق يردّ بصوت (Gemini + تعرّف/نطق أندرويد)."
 }

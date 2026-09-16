@@ -631,6 +631,18 @@ private val AR_MAP = mapOf(
     "rec_failed" to "التسجيل قصير جدًا أو فشل — جرّب تاني",
     "copied" to "تم النسخ",
     "ai_failed" to "تعذّر التنسيق",
+    "voice_assistant" to "المساعد الصوتي",
+    "voice_assistant_desc" to "اتكلم واسأل عن يومك وبياناتك.",
+    "voice_you_said" to "قلت:",
+    "voice_listening" to "بسمعك…",
+    "voice_thinking" to "بفكّر…",
+    "voice_speaking" to "برد…",
+    "voice_tap_to_talk" to "دوس واتكلم",
+    "voice_replay" to "إعادة",
+    "voice_examples" to "مثال: «عندي كام زيارة النهاردة؟» · «مين المتأخر في المتابعات؟»",
+    "voice_didnt_catch" to "معرفتش أسمعك، جرّب تاني.",
+    "voice_unavailable" to "التعرّف على الصوت مش متاح على الجهاز ده.",
+    "voice_need_mic" to "محتاج إذن الميكروفون علشان أسمعك.",
 )
 
 private val EN_MAP = mapOf(
@@ -1257,6 +1269,18 @@ private val EN_MAP = mapOf(
     "rec_failed" to "Recording too short or failed — try again",
     "copied" to "Copied",
     "ai_failed" to "Couldn't format",
+    "voice_assistant" to "Voice assistant",
+    "voice_assistant_desc" to "Talk and ask about your day and your data.",
+    "voice_you_said" to "You said:",
+    "voice_listening" to "Listening…",
+    "voice_thinking" to "Thinking…",
+    "voice_speaking" to "Answering…",
+    "voice_tap_to_talk" to "Tap and talk",
+    "voice_replay" to "Replay",
+    "voice_examples" to "e.g. \"How many visits do I have today?\" · \"Who's overdue on follow-ups?\"",
+    "voice_didnt_catch" to "Didn't catch that, try again.",
+    "voice_unavailable" to "Speech recognition isn't available on this device.",
+    "voice_need_mic" to "I need microphone permission to hear you.",
 )
 
 val AR = L(false, AR_MAP)

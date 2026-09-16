@@ -380,6 +380,26 @@ $findings"""
         }
     }
 
+    /** Voice assistant (talk-to-your-data): answers the rep's spoken question from locally-computed
+     *  facts only, in 1-3 short spoken sentences. The app computes numbers; the model only phrases. */
+    suspend fun assistant(apiKey: String, model: String, question: String, facts: String, english: Boolean): String {
+        val lang = if (english) "English" else "Egyptian Arabic"
+        val prompt = """You are VisitFlow's voice assistant for a field sales rep. Answer the rep's spoken question in $lang in 1-3 short, natural spoken sentences. This is read aloud, so no bullet points, no markdown, no lists.
+Use ONLY the facts below, which the app just computed from the rep's own data. Do NOT invent names, numbers, dates, or outcomes not in the facts. If the facts don't cover it, say briefly that you don't have that. Never promise anything to a customer.
+
+REP QUESTION: $question
+
+FACTS (computed by the app now):
+$facts"""
+        return withContext(Dispatchers.IO) {
+            val body = JSONObject().apply {
+                put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
+                put("generationConfig", JSONObject().put("temperature", 0.4))
+            }
+            postForText(apiKey, model, body)
+        }
+    }
+
     /** POST that returns the model's raw text output (for prose, not JSON). */
     private fun postForText(apiKey: String, model: String, body: JSONObject): String {
         val key = apiKey.trim()
