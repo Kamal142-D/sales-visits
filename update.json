@@ -1,6 +1,6 @@
 {
-  "versionCode": 21,
-  "versionName": "1.11.0",
+  "versionCode": 22,
+  "versionName": "1.11.1",
   "apkUrl": "https://raw.githubusercontent.com/Kamal142-D/sales-visits/main/app-release.apk",
-  "notes": "VisitFlow 1.11.0: تبويب «المساعد» جديد في البار السفلي — مساعد ذكي بـOpenAI بيجاوب وينفّذ مهام (إضافة/نقل متابعة) بعد تأكيدك. ضيف مفتاح OpenAI من الإعدادات."
+  "notes": "VisitFlow 1.11.1: تحسين شكل تبويب المساعد — شريط كتابة واحد فوق البار + اقتراحات قابلة للضغط."
 }

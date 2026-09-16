@@ -10,6 +10,7 @@ import android.speech.tts.TextToSpeech
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -18,6 +19,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -135,9 +142,23 @@ fun AssistantScreen(store: Store) {
                     Icon(AppIcons.Mic, null, tint = c.ink2, modifier = Modifier.size(30.dp))
                 }
                 Spacer(Modifier.height(14.dp))
-                Text(t["agent_intro"], color = c.muted, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(8.dp))
-                Text(t["agent_examples"], color = c.faint, fontSize = 12.sp)
+                Text(t["agent_intro"], color = c.ink2, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Spacer(Modifier.height(16.dp))
+                // Tappable example prompts.
+                listOf(t["agent_ex1"], t["agent_ex2"], t["agent_ex3"]).forEach { ex ->
+                    Surface(
+                        onClick = { send(ex) },
+                        shape = RoundedCornerShape(14.dp), color = c.surface,
+                        border = BorderStroke(1.dp, c.edge),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    ) {
+                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("💬", fontSize = 15.sp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(ex, color = c.ink, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
             }
         } else {
             LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -147,17 +168,32 @@ fun AssistantScreen(store: Store) {
             }
         }
 
-        // Input row
-        Surface(color = c.surface, shadowElevation = if (c.dark) 0.dp else 8.dp) {
-            Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(46.dp).clip(CircleShape).background(if (listening) c.lost else c.sunk).clickable { onMic() }, contentAlignment = Alignment.Center) {
-                    Icon(AppIcons.Mic, t["voice_tap_to_talk"], tint = if (listening) c.onInk else c.ink2, modifier = Modifier.size(22.dp))
-                }
-                Spacer(Modifier.width(8.dp))
-                Box(Modifier.weight(1f)) { Input(input, { input = it }, t["agent_placeholder"]) }
-                Spacer(Modifier.width(8.dp))
-                Box(Modifier.size(46.dp).clip(CircleShape).background(c.ink).clickable { send(input) }, contentAlignment = Alignment.Center) {
-                    Icon(if (t.en) AppIcons.ArrowForward else AppIcons.ArrowBack, t["send"], tint = c.onInk, modifier = Modifier.size(22.dp))
+        // Input bar — one rounded pill, lifted clear of the floating bottom nav.
+        Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 86.dp)) {
+            Surface(
+                shape = RoundedCornerShape(26.dp), color = c.surface,
+                border = BorderStroke(1.dp, if (listening) c.ink else c.edge),
+                shadowElevation = if (c.dark) 0.dp else 6.dp, modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(42.dp).clip(CircleShape).background(if (listening) c.lost else c.sunk).clickable { onMic() }, contentAlignment = Alignment.Center) {
+                        Icon(AppIcons.Mic, t["voice_tap_to_talk"], tint = if (listening) c.onInk else c.ink2, modifier = Modifier.size(20.dp))
+                    }
+                    Box(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                        if (input.isEmpty()) Text(t["agent_placeholder"], color = c.faint, fontSize = 15.sp)
+                        BasicTextField(
+                            value = input, onValueChange = { input = it },
+                            textStyle = TextStyle(color = c.ink, fontSize = 15.sp),
+                            cursorBrush = SolidColor(c.ink),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = { send(input) }),
+                            maxLines = 4, modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    val ready = input.isNotBlank()
+                    Box(Modifier.size(42.dp).clip(CircleShape).background(if (ready) c.ink else c.sunk).clickable { send(input) }, contentAlignment = Alignment.Center) {
+                        Icon(if (t.en) AppIcons.ArrowForward else AppIcons.ArrowBack, t["send"], tint = if (ready) c.onInk else c.faint, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
         }
