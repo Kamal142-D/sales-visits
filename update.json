@@ -1,6 +1,6 @@
 {
-  "versionCode": 17,
-  "versionName": "1.9.2",
+  "versionCode": 18,
+  "versionName": "1.9.3",
   "apkUrl": "https://raw.githubusercontent.com/Kamal142-D/sales-visits/main/app-release.apk",
-  "notes": "VisitFlow 1.9.2: تنظيم صفحة الأدوات بأقسام واضحة (بعد تنظيم الإعدادات وخط Inter)."
+  "notes": "VisitFlow 1.9.3: إزالة تاب «المهام» من البار السفلي (المهام لسه بتظهر في أجندة اليوم)."
 }

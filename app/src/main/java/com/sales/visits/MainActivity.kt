@@ -300,7 +300,6 @@ fun App(store: Store) {
                                 onEdit = { editing = it; editorPivot = Offset.Zero; editorFromFab = false; editorOpen = true },
                             )
                             2 -> ReportScreen(store)
-                            3 -> TasksScreen(store)
                             else -> ProfileScreen(
                                 store = store,
                                 account = cloud,
@@ -579,7 +578,7 @@ private fun NavPill(tab: Int, onTab: (Int) -> Unit, modifier: Modifier) {
     val t = LocalL.current
     val tabs = listOf(
         t["visits"] to AppIcons.Home, t["today"] to AppIcons.Directions,
-        t["report_tab"] to AppIcons.Report, t["tasks_tab"] to AppIcons.Plan,
+        t["report_tab"] to AppIcons.Report,
         t["profile"] to AppIcons.Person,
     )
     val itemSize = 48.dp
