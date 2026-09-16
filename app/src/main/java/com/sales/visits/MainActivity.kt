@@ -4991,10 +4991,22 @@ private fun ToolsHub(
             Spacer(Modifier.width(12.dp))
             Text(t["tools"], fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, fontFamily = LocalDisplayFont.current, color = c.ink)
         }
-        Spacer(Modifier.height(6.dp))
+        // ---- Pipeline: deals, projects, and records that need attention ----
+        SettingsHeader(t["tools_sec_pipeline"])
         GroupCard {
             SettingsRow(AppIcons.Chart, t["opportunities"]) { onOpps() }
             HorizontalDivider(color = c.edge)
+            SettingsRow(AppIcons.Map, t["projects"]) { onProjects() }
+            val unlinked = store.unlinkedNames()
+            if (unlinked.isNotEmpty()) {
+                HorizontalDivider(color = c.edge)
+                SettingsRow(AppIcons.PersonAdd, t["needs_linking"], value = unlinked.size.toString()) { onLinking() }
+            }
+        }
+
+        // ---- Insights & reports ----
+        SettingsHeader(t["tools_sec_insights"])
+        GroupCard {
             SettingsRow(AppIcons.Insights, t["insights_tab"]) { onInsights() }
             HorizontalDivider(color = c.edge)
             SettingsRow(AppIcons.Chart, t["analytics"]) { onAnalytics() }
@@ -5003,19 +5015,11 @@ private fun ToolsHub(
             HorizontalDivider(color = c.edge)
             SettingsRow(AppIcons.Chart, t["lost_deals"]) { onLost() }
             HorizontalDivider(color = c.edge)
-            SettingsRow(AppIcons.Map, t["projects"]) { onProjects() }
-            HorizontalDivider(color = c.edge)
-            val unlinked = store.unlinkedNames()
-            if (unlinked.isNotEmpty()) {
-                SettingsRow(AppIcons.PersonAdd, t["needs_linking"], value = unlinked.size.toString()) { onLinking() }
-                HorizontalDivider(color = c.edge)
-            }
             SettingsRow(AppIcons.Search, t["ask_data"]) { onAsk() }
-            if (onTeam != null) {
-                HorizontalDivider(color = c.edge)
-                SettingsRow(AppIcons.People, t["team"]) { onTeam() }
-            }
         }
+
+        // ---- Catalog: stock, prices, product knowledge ----
+        SettingsHeader(t["tools_sec_catalog"])
         GroupCard {
             SettingsRow(AppIcons.Inbox, t["inventory"]) { onStock() }
             HorizontalDivider(color = c.edge)
@@ -5024,7 +5028,15 @@ private fun ToolsHub(
             SettingsRow(AppIcons.Inbox, t["product_knowledge"]) { onKnowledge() }
             HorizontalDivider(color = c.edge)
             SettingsRow(AppIcons.Plan, t["objections"]) { onObjections() }
-            HorizontalDivider(color = c.edge)
+        }
+
+        // ---- Team & communication ----
+        SettingsHeader(t["tools_sec_team"])
+        GroupCard {
+            if (onTeam != null) {
+                SettingsRow(AppIcons.People, t["team"]) { onTeam() }
+                HorizontalDivider(color = c.edge)
+            }
             SettingsRow(AppIcons.Email, t["mail"]) { onMail() }
         }
         Spacer(Modifier.height(40.dp))
