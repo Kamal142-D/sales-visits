@@ -453,19 +453,33 @@ class Store(context: Context) {
     internal fun prepareForAccount(uid: String) {
         val prev = sp.getString("last_account_uid", null)
         if (prev != null && prev != uid) {
+            // Stash the OUTGOING account's local state (including edits not yet uploaded) so switching
+            // back restores them instead of losing them, then load the INCOMING account's own stash
+            // (empty on first sign-in of that account) — never leaking one account's data into another.
+            sp.edit().putString(accountLocalKey(prev), json.encodeToString(snapshot(""))).apply()
+            sp.edit().putString(accountPhotoKey(prev), profilePhotoPath).apply()
             visits.forEach { ReminderScheduler.cancel(appContext, it.id) }
-            visits = emptyList(); customers = emptyList(); plan = emptyList()
-            tasks = emptyList(); inventory = emptyList(); opportunities = emptyList(); orders = emptyList(); activities = emptyList(); quotes = emptyList(); products = emptyList(); objections = emptyList(); attachments = emptyList(); projects = emptyList()
-            persist(); persistCustomers(); persistPlan(); persistTasks(); persistInventory(); persistOpportunities(); persistOrders(); persistActivities(); persistQuotes(); persistProducts(); persistObjections(); persistAttachments(); persistProjects()
-            setProfilePhoto("")   // the photo is per-account and local; drop the previous one
+            val restored = sp.getString(accountLocalKey(uid), null)
+                ?.let { runCatching { json.decodeFromString<AppBackup>(it) }.getOrNull() }
+            applyBackup(restored ?: AppBackup(exportedAt = "", visits = emptyList(), customers = emptyList(), plan = emptyList()))
+            setProfilePhoto(sp.getString(accountPhotoKey(uid), "") ?: "")
         }
         sp.edit().putString("last_account_uid", uid).apply()
     }
 
+    private fun accountLocalKey(uid: String) = "acct_local_$uid"
+    private fun accountPhotoKey(uid: String) = "acct_photo_$uid"
+
     fun restoreBackup(raw: String): Boolean = runCatching {
         val decoded = json.decodeFromString<AppBackup>(raw)
         require(decoded.version in 1..CURRENT_BACKUP_VERSION)   // refuse a future schema we can't read
-        val backup = DataMigration.migrate(decoded, ::pid)      // link + backfill before it becomes live
+        applyBackup(DataMigration.migrate(decoded, ::pid))      // link + backfill before it becomes live
+        true
+    }.getOrDefault(false)
+
+    /** Assigns every collection from [backup] and persists it, rescheduling reminders. The backup must
+     *  already be at the current schema (callers migrate imported data first). */
+    private fun applyBackup(backup: AppBackup) {
         visits.forEach { ReminderScheduler.cancel(appContext, it.id) }
         visits = backup.visits
         customers = backup.customers
@@ -480,22 +494,11 @@ class Store(context: Context) {
         objections = backup.objections
         attachments = backup.attachments
         projects = backup.projects
-        persist()
-        persistCustomers()
-        persistPlan()
-        persistTasks()
-        persistInventory()
-        persistOpportunities()
-        persistOrders()
-        persistActivities()
-        persistQuotes()
-        persistProducts()
-        persistObjections()
-        persistAttachments()
-        persistProjects()
+        persist(); persistCustomers(); persistPlan(); persistTasks(); persistInventory()
+        persistOpportunities(); persistOrders(); persistActivities(); persistQuotes()
+        persistProducts(); persistObjections(); persistAttachments(); persistProjects()
         ReminderScheduler.reschedule(appContext, visits)
-        true
-    }.getOrDefault(false)
+    }
 
     // ---- Today plan (roadmap) ----
     var plan by mutableStateOf(loadPlan())
@@ -645,18 +648,30 @@ class Store(context: Context) {
         if (ev.isNotBlank() && CalendarSync.isConnected(appContext)) Thread { CalendarSync.delete(appContext, ev) }.start()
     }
 
-    /** Adds a task to Google Calendar (6.4) and stores the event id so later edits/deletes sync.
-     *  Returns false (no-op) when Calendar isn't connected — the caller then uses the intent fallback. */
+    private val calendarSyncing = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** Puts a task on Google Calendar (6.4), storing the event id so later edits/deletes follow it.
+     *  Idempotent: if the task already has an event it UPDATES it (never creates a duplicate), and a
+     *  double-tap while a request is in flight is ignored. Returns false (no-op) when Calendar isn't
+     *  connected — the caller then uses the one-shot intent fallback. */
     fun addTaskToCalendar(id: String): Boolean {
         if (!CalendarSync.isConnected(appContext)) return false
         val task = tasks.firstOrNull { it.id == id } ?: return false
+        if (!calendarSyncing.add(id)) return true   // a request for this task is already running
         val title = listOf(task.client, task.action).filter { it.isNotBlank() }.joinToString(": ").ifBlank { task.action }
         Thread {
-            val ev = CalendarSync.create(appContext, title, task.action, task.date, task.time, task.minutes)
-            if (ev != null) {
-                tasks = tasks.map { if (it.id == id) it.copy(calendarEventId = ev) else it }
-                persistTasks()
-            }
+            try {
+                val existing = task.calendarEventId
+                if (existing.isNotBlank()) {
+                    CalendarSync.update(appContext, existing, title, task.action, task.date, task.time, task.minutes)
+                } else {
+                    val ev = CalendarSync.create(appContext, title, task.action, task.date, task.time, task.minutes)
+                    if (ev != null) {
+                        tasks = tasks.map { if (it.id == id) it.copy(calendarEventId = ev) else it }
+                        persistTasks()
+                    }
+                }
+            } finally { calendarSyncing.remove(id) }
         }.start()
         return true
     }

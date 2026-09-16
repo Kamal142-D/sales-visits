@@ -76,6 +76,7 @@ service cloud.firestore {
         // A manager may edit freely; the assigned rep may change ONLY the `done` flag on their own
         // item — never reassign it, move it to another customer, or touch another rep's work.
         allow update: if isManager(cid) || (
+          isMember(cid) &&
           resource.data.assignedTo == request.auth.uid &&
           request.resource.data.assignedTo == resource.data.assignedTo &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['done'])
@@ -94,15 +95,15 @@ service cloud.firestore {
         allow read: if isMember(cid);
         allow create: if isMember(cid) && request.resource.data.ownerUid == request.auth.uid;
         allow update: if isManager(cid) ||
-          (resource.data.ownerUid == request.auth.uid && request.resource.data.ownerUid == resource.data.ownerUid);
-        allow delete: if isManager(cid) || resource.data.ownerUid == request.auth.uid;
+          (isMember(cid) && resource.data.ownerUid == request.auth.uid && request.resource.data.ownerUid == resource.data.ownerUid);
+        allow delete: if isManager(cid) || (isMember(cid) && resource.data.ownerUid == request.auth.uid);
       }
       match /opportunities/{docId} {
         allow read: if isMember(cid);
         allow create: if isMember(cid) && request.resource.data.ownerUid == request.auth.uid;
         allow update: if isManager(cid) ||
-          (resource.data.ownerUid == request.auth.uid && request.resource.data.ownerUid == resource.data.ownerUid);
-        allow delete: if isManager(cid) || resource.data.ownerUid == request.auth.uid;
+          (isMember(cid) && resource.data.ownerUid == request.auth.uid && request.resource.data.ownerUid == resource.data.ownerUid);
+        allow delete: if isManager(cid) || (isMember(cid) && resource.data.ownerUid == request.auth.uid);
       }
     }
 

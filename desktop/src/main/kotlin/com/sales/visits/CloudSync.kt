@@ -121,8 +121,10 @@ class CloudSync(private val store: Store) {
             val resolved = when {
                 local == last -> remote
                 remote == last -> local
-                else -> store.threeWayMerge(last, local, remote) ?: local
+                else -> store.threeWayMerge(last, local, remote)
             }
+            // Null = remote uses a newer schema; never overwrite it with our local copy.
+            if (resolved == null) { withContext(Dispatchers.Main) { syncState = "outdated" }; firstSyncDone = true; return }
             if (resolved != local) withContext(Dispatchers.Main) { store.restoreCloudSnapshot(resolved) }
             if (resolved == remote) {
                 store.setCloudPref(lastKey(u), resolved)
@@ -195,8 +197,10 @@ class CloudSync(private val store: Store) {
         val token = ensureToken()
         val base = store.cloudPref(lastKey(u)).ifBlank { null }
         val (remoteNow, updateTime) = pullWithMeta(u)
+        // Null merge = remote schema too new. Abort rather than overwrite it; ask the user to update.
         val merged = if (remoteNow.isNullOrBlank()) snapshot
-            else store.threeWayMerge(base, snapshot, remoteNow) ?: snapshot
+            else store.threeWayMerge(base, snapshot, remoteNow)
+                ?: run { withContext(Dispatchers.Main) { syncState = "outdated" }; return }
         // updateMask keeps us from clobbering the "profile" field the phone writes.
         var url = docUrl(u) + "?updateMask.fieldPaths=snapshot&updateMask.fieldPaths=updatedAt"
         if (updateTime != null) url += "&currentDocument.updateTime=" + URLEncoder.encode(updateTime, "UTF-8")
@@ -206,9 +210,14 @@ class CloudSync(private val store: Store) {
         val (code, text) = httpSend("PATCH", url, body.toString(), token)
         when {
             code in 200..299 -> {
+                if (uid != u) return   // account switched during the network call — result isn't ours
                 store.setCloudPref(lastKey(u), merged)
-                if (merged != snapshot) withContext(Dispatchers.Main) { store.restoreCloudSnapshot(merged) }
+                // Reconcile edits made locally during the push (base = what we sent) with the server result.
+                val localNow = store.cloudSnapshot()
+                val reconciled = store.threeWayMerge(snapshot, localNow, merged) ?: merged
+                if (reconciled != localNow) withContext(Dispatchers.Main) { store.restoreCloudSnapshot(reconciled) }
                 withContext(Dispatchers.Main) { syncState = if (store.lastMergeConflicts > 0) "conflict" else "synced" }
+                if (reconciled != merged) queueUpload()   // new local edits appeared mid-push → push them
             }
             // Someone else wrote between our read and write: re-read, re-merge, retry.
             attempts > 1 && (code == 409 || code == 412 || text.contains("FAILED_PRECONDITION")) ->

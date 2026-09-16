@@ -117,8 +117,11 @@ class CloudAccount(context: Context, private val store: Store) {
         val resolved = when {
             local == last -> remote
             remote == last -> local
-            else -> store.threeWayMerge(last, local, remote) ?: local
+            else -> store.threeWayMerge(last, local, remote)
         }
+        // A null merge means the remote uses a newer schema than this app understands. Do NOT fall back
+        // to overwriting it with our local copy — that would erase the newer fields. Ask the user to update.
+        if (resolved == null) { syncState = "outdated"; return }
         if (resolved != local) store.restoreCloudSnapshot(resolved)
         if (resolved == remote) {
             // Nothing new to push; remote is already the agreed state.
@@ -152,12 +155,15 @@ class CloudAccount(context: Context, private val store: Store) {
         val ref = stateRef(current.uid)
         val base = prefs.getString(lastKey(current.uid), null)
         val profileJson = json.encodeToString(profile)
+        val refused = booleanArrayOf(false)   // set inside the txn when the remote schema is too new to merge
         // One Firestore document is capped at ~1 MiB; a write beyond it fails the transaction and we
         // surface "offline" (not "synced"). Split into per-collection docs when data approaches it.
         db.runTransaction { txn ->
             val remoteNow = txn.get(ref).getString("snapshot")
+            // If the remote can't be merged (newer schema), ABORT — never overwrite it with our copy.
             val merged = if (remoteNow.isNullOrBlank()) snapshot
-                else store.threeWayMerge(base, snapshot, remoteNow) ?: snapshot
+                else store.threeWayMerge(base, snapshot, remoteNow)
+                    ?: run { refused[0] = true; throw IllegalStateException("version_incompatible") }
             txn.set(
                 ref,
                 mapOf("snapshot" to merged, "profile" to profileJson, "updatedAt" to FieldValue.serverTimestamp()),
@@ -165,10 +171,18 @@ class CloudAccount(context: Context, private val store: Store) {
             )
             merged
         }.addOnSuccessListener { merged ->
+            // The account may have signed out or switched during the network round-trip; if so, this
+            // result belongs to a different session — don't apply it to whoever is signed in now.
+            if (user?.uid != current.uid) return@addOnSuccessListener
             saveLast(current.uid, merged)
-            if (merged != snapshot) store.restoreCloudSnapshot(merged)   // reflect merged-in remote changes locally
+            // Reconcile edits made locally DURING the upload (base = what we sent) with the server
+            // result, so a concurrent local edit isn't overwritten by the merged snapshot.
+            val localNow = store.cloudSnapshot()
+            val reconciled = store.threeWayMerge(snapshot, localNow, merged) ?: merged
+            if (reconciled != localNow) store.restoreCloudSnapshot(reconciled)
             syncState = if (store.lastMergeConflicts > 0) "conflict" else "synced"
-        }.addOnFailureListener { syncState = "offline" }
+            if (reconciled != merged) queueUpload()   // new local edits appeared mid-upload → push them
+        }.addOnFailureListener { syncState = if (refused[0]) "outdated" else "offline" }
     }
 
     fun signIn(email: String, password: String) {

@@ -42,6 +42,10 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(s, 'companies/co1/opportunities/oRep'), { title: 'Rep deal', ownerUid: 'rep' });
   await setDoc(doc(s, 'companies/co1/opportunities/oMgr'), { title: 'Mgr deal', ownerUid: 'mgr' });
   await setDoc(doc(s, 'companies/co1/customers/cuRep'), { name: 'Shared Cust', ownerUid: 'rep' });
+  // Records still owned by a user whose membership was already removed (ex-rep), plus their assignment.
+  await setDoc(doc(s, 'companies/co1/assignments/aEx'), { customerName: 'Ex', assignedTo: 'exrep', done: false });
+  await setDoc(doc(s, 'companies/co1/customers/cuEx'), { name: 'Ex Cust', ownerUid: 'exrep' });
+  await setDoc(doc(s, 'companies/co1/opportunities/oEx'), { title: 'Ex deal', ownerUid: 'exrep' });
 });
 
 let passed = 0, failed = 0;
@@ -136,6 +140,14 @@ await check('member cannot create a shared record owned by someone else',
   assertFails(setDoc(doc(db('rep'), 'companies/co1/customers/spoof'), { name: 'X', ownerUid: 'mgr' })));
 await check('rep can delete their own shared customer, not others’',
   assertSucceeds(deleteDoc(doc(db('rep'), 'companies/co1/customers/cuRep'))));
+
+// 14) A REMOVED member (no membership row) keeps no write access to records they still "own".
+await check('removed member cannot flip done on their old assignment',
+  assertFails(updateDoc(doc(db('exrep'), 'companies/co1/assignments/aEx'), { done: true })));
+await check('removed member cannot edit a shared customer they owned',
+  assertFails(updateDoc(doc(db('exrep'), 'companies/co1/customers/cuEx'), { name: 'Changed' })));
+await check('removed member cannot delete a shared opportunity they owned',
+  assertFails(deleteDoc(doc(db('exrep'), 'companies/co1/opportunities/oEx'))));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 await testEnv.cleanup();

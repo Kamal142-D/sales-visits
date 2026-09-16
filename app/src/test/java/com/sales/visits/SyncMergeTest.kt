@@ -35,8 +35,8 @@ class SyncMergeTest {
         val result = SyncMerge.merge(base, local, remote)
         val out = result.backup.visits.associateBy { it.id }
         assertEquals(1, result.conflicts)
-        assertNotNull(out["v1"])                    // a winner keeps the id
-        assertNotNull(out["v1~c"])                  // the loser is preserved as a conflict copy
+        assertNotNull(out["v1"])                                     // a winner keeps the id
+        assertTrue(out.keys.any { it.startsWith("v1~c") })          // loser preserved as a conflict copy
         val clients = out.values.map { it.client }.toSet()
         assertTrue("AAA" in clients && "ZZZ" in clients)   // neither version lost
     }
@@ -49,7 +49,9 @@ class SyncMergeTest {
         val ab = SyncMerge.merge(base, a, b).backup.visits.associateBy { it.id }
         val ba = SyncMerge.merge(base, b, a).backup.visits.associateBy { it.id }
         assertEquals(ab["v1"]?.client, ba["v1"]?.client)
-        assertEquals(ab["v1~c"]?.client, ba["v1~c"]?.client)
+        // The loser copy (whatever its content-derived id) must be the same on both orderings.
+        assertEquals(ab.keys.toSet(), ba.keys.toSet())
+        assertEquals(ab.values.map { it.client }.toSet(), ba.values.map { it.client }.toSet())
     }
 
     // Re-merging the merged result against itself as base creates no further conflict copies.
@@ -90,5 +92,24 @@ class SyncMergeTest {
         val out = visitsOf(bk(), bk(v("a", "L")), bk(v("b", "R")))
         assertEquals("L", out["a"]?.client)
         assertEquals("R", out["b"]?.client)
+    }
+
+    // A SECOND conflict on a record that already has an old "~c" copy must still keep both new edits
+    // (the fixed "~c" slot must not swallow one). Content-derived copy ids make this hold.
+    @Test fun secondConflictKeepsBothNewEdits() {
+        val base = bk(v("v1", "A"), v("v1~c", "Z"))
+        val local = bk(v("v1", "B"), v("v1~c", "Z"))
+        val remote = bk(v("v1", "C"), v("v1~c", "Z"))
+        val clients = visitsOf(base, local, remote).values.map { it.client }.toSet()
+        assertTrue("Both concurrent edits + the old copy must survive; got $clients", clients.containsAll(setOf("B", "C", "Z")))
+    }
+
+    // Re-merging an already-merged result is idempotent: no new conflict copies pile up.
+    @Test fun conflictMergeIsIdempotent() {
+        val base = bk(v("v1", "A"))
+        val merged = SyncMerge.merge(base, bk(v("v1", "B")), bk(v("v1", "C"))).backup
+        val again = SyncMerge.merge(merged, merged, merged)
+        assertEquals(0, again.conflicts)
+        assertEquals(merged.visits.map { it.id }.toSet(), again.backup.visits.map { it.id }.toSet())
     }
 }

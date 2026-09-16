@@ -62,11 +62,22 @@ object SyncMerge {
                     val ls = enc.encodeToString(li); val rs = enc.encodeToString(ri)
                     val localWins = ls <= rs
                     out.add(if (localWins) li else ri)
-                    val cid = "$id~c"
-                    if (!ids.contains(cid)) { out.add(withId(if (localWins) ri else li, cid)); conflicts++ }
+                    val loser = if (localWins) ri else li
+                    val loserStr = if (localWins) rs else ls
+                    // Conflict-copy id derived from the LOSING content (not a fixed "~c" slot): converges
+                    // across devices, is idempotent on re-merge, and never drops a second conflicting edit.
+                    val cid = "$id~c-" + conflictHash(loserStr)
+                    if (!ids.contains(cid) && out.none { idOf(it) == cid }) { out.add(withId(loser, cid)); conflicts++ }
                 }
             }
         }
         return ListResult(out, conflicts)
+    }
+
+    /** Stable 64-bit content hash (FNV-1a), identical on Android and desktop, for conflict-copy ids. */
+    @PublishedApi internal fun conflictHash(s: String): String {
+        var h = 0xcbf29ce484222325uL
+        for (byte in s.toByteArray(Charsets.UTF_8)) { h = (h xor (byte.toUByte().toULong())) * 0x100000001b3uL }
+        return h.toString(16)
     }
 }

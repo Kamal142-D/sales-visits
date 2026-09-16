@@ -61,15 +61,27 @@ class Store(private val dir: File = defaultDataDir()) {
     internal fun cloudPref(key: String, default: String = ""): String = prop(key, default)
     internal fun setCloudPref(key: String, value: String) = setProp(key, value)
 
-    /** Drop the previous account's local data when a different account signs in (isolation). */
+    /** On account switch, stash the OUTGOING account's local data (edits not yet uploaded) to a
+     *  per-account file and load the INCOMING account's stash — never dropping data or leaking it
+     *  between accounts. First sign-in of an account starts empty. */
     internal fun prepareForAccount(uid: String) {
         val prev = prop("cloud_uid", "")
         if (prev.isNotBlank() && prev != uid) {
-            visits = emptyList(); customers = emptyList(); plan = emptyList()
-            tasks = emptyList(); inventory = emptyList(); opportunities = emptyList(); orders = emptyList(); activities = emptyList(); quotes = emptyList(); products = emptyList(); objections = emptyList(); attachments = emptyList(); projects = emptyList()
-            saveData()
+            runCatching { File(dir, "data-$prev.json").writeText(json.encodeToString(currentStored())) }
+            val incoming = File(dir, "data-$uid.json")
+            val restored = if (incoming.exists()) runCatching { json.decodeFromString<StoredData>(incoming.readText()) }.getOrNull() else null
+            applyStored(restored ?: StoredData())
         }
         setProp("cloud_uid", uid)
+    }
+
+    private fun currentStored() = StoredData(visits, customers, plan, tasks, inventory, opportunities, orders, activities, quotes, products, objections, attachments, projects)
+
+    private fun applyStored(d: StoredData) {
+        visits = d.visits; customers = d.customers; plan = d.plan; tasks = d.tasks; inventory = d.inventory
+        opportunities = d.opportunities; orders = d.orders; activities = d.activities; quotes = d.quotes
+        products = d.products; objections = d.objections; attachments = d.attachments; projects = d.projects
+        saveData()
     }
 
     // ---- persisted lists ----

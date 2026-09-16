@@ -89,15 +89,20 @@ object DriveSync {
         }.getOrNull()
     }
 
-    /** Downloads a Drive file by id into [dest]; returns true on success. Blocking. */
+    /** Downloads a Drive file by id into [dest]; returns true on success. Blocking.
+     *  Writes to a temp file and renames on success, so a stopped download never leaves a partial file
+     *  at [dest] that a later open could mistake for a complete one. */
     fun download(ctx: Context, fileId: String, dest: File): Boolean {
         val token = token(ctx) ?: return false
+        val tmp = File(dest.absolutePath + ".part")
         return runCatching {
             val c = conn("https://www.googleapis.com/drive/v3/files/$fileId?alt=media", "GET", token)
-            if (c.responseCode !in 200..299) { c.disconnect(); return false }
-            c.inputStream.use { input -> dest.outputStream().use { input.copyTo(it) } }
+            if (c.responseCode !in 200..299) { c.disconnect(); tmp.delete(); return false }
+            c.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
             c.disconnect()
-            true
-        }.getOrDefault(false)
+            if (dest.exists()) dest.delete()
+            if (!tmp.renameTo(dest)) { tmp.copyTo(dest, overwrite = true); tmp.delete() }
+            dest.exists()
+        }.getOrElse { runCatching { tmp.delete() }; false }
     }
 }

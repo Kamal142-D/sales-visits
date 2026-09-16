@@ -10,13 +10,14 @@ import java.net.URL
 import java.util.TimeZone
 
 /**
- * Two-way Google Calendar sync (plan 6.4). A task/visit added to the calendar creates a real event via
- * the Calendar API; its event id is stored on the task ([PlanItem.calendarEventId]) so later edits
- * update the same event and deleting/finishing the task removes it — genuine two-way, not a one-shot
- * intent. Uses the same Google connection as [DriveSync] (one sign-in grants both scopes).
+ * Google Calendar sync (plan 6.4) — app → calendar. Adding a task creates a real event via the Calendar
+ * API; its id is stored on the task ([PlanItem.calendarEventId]) so a later edit UPDATES the same event
+ * and deleting the task removes it (no duplicates). This is one-directional: changes made inside Google
+ * Calendar are NOT pulled back into the app (a Google → app path with a conflict policy is future work).
+ * A failed update/delete is not yet queued for retry.
  *
- * Note: calendar.events is a "sensitive" scope. For the user's own account this works; because the app
- * isn't Google-verified, they may see a one-time "unverified app" screen to click through.
+ * Uses the same Google connection as [DriveSync] (one sign-in grants both scopes). calendar.events is a
+ * "sensitive" scope; for the user's own account it works, though an unverified-app screen may appear once.
  */
 object CalendarSync {
     const val SCOPE_STR = "https://www.googleapis.com/auth/calendar.events"
@@ -45,8 +46,10 @@ object CalendarSync {
         o.put("summary", title.ifBlank { "VisitFlow" })
         if (description.isNotBlank()) o.put("description", description)
         if (timeHm.isBlank()) {
+            // All-day event: Google treats `end.date` as EXCLUSIVE, so a one-day event ends the NEXT day.
+            val endDate = runCatching { java.time.LocalDate.parse(dateIso).plusDays(1).toString() }.getOrDefault(dateIso)
             o.put("start", JSONObject().put("date", dateIso))
-            o.put("end", JSONObject().put("date", dateIso))
+            o.put("end", JSONObject().put("date", endDate))
         } else {
             val tz = TimeZone.getDefault().id
             val startLocal = "${dateIso}T${normHm(timeHm)}:00"
