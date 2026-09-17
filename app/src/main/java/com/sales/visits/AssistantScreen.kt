@@ -83,7 +83,7 @@ fun AssistantScreen(store: Store) {
         val history = messages.filter { it.role == "user" || it.role == "assistant" }.map { AiAgent.Msg(if (it.role == "user") "user" else "assistant", it.text) }
         scope.launch {
             try {
-                val facts = assistantFacts(store, t.en)
+                val facts = assistantContext(store, q, t.en)
                 val turn = AiAgent.run(store.openAiKey, store.openAiModel, history, facts, todayIso(), t.en)
                 messages.add(ChatMsg("assistant", turn.reply)); speak(turn.reply)
                 if (turn.intent.action == CommandAction.ADD_TASK || turn.intent.action == CommandAction.RESCHEDULE_TASK) pending = turn.intent

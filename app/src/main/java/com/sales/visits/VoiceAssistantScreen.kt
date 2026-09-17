@@ -68,6 +68,53 @@ internal fun assistantFacts(store: Store, en: Boolean): String = buildString {
     appendLine("Total customers: ${store.customers.size}.")
 }
 
+/** Day facts PLUS records relevant to [question] (searched locally by keyword), so the assistant can
+ *  answer detailed questions about a specific customer / deal / visit — from real data, never invented. */
+internal fun assistantContext(store: Store, question: String, en: Boolean): String {
+    val base = assistantFacts(store, en)
+    val stop = setOf("the","and","for","with","what","when","who","how","my","me","about","is","are","على","في","عن","مين","إيه","ايه","كام","ايه","من","ال","اللي","الي","يا")
+    val keys = question.lowercase().split(Regex("[^\\p{L}\\p{N}]+"))
+        .map { it.trim() }.filter { it.length >= 2 && it !in stop }.distinct()
+    if (keys.isEmpty()) return base
+    fun hit(text: String): Boolean { val l = text.lowercase(); return keys.any { l.contains(it) } }
+    fun trim(s: String, n: Int = 260) = s.replace("\n", " ").trim().let { if (it.length > n) it.take(n) + "…" else it }
+
+    val custs = store.customers.filter { hit(it.name + " " + it.contact + " " + it.city + " " + it.industry + " " + it.phone + " " + it.notes) }.take(4)
+    val sb = StringBuilder()
+    fun line(s: String) { sb.append(s); sb.append('\n') }
+    custs.forEach { cu ->
+        val where = listOf(cu.city, cu.industry).filter { it.isNotBlank() }.joinToString()
+        line("CUSTOMER: " + cu.name + (if (where.isNotBlank()) " ($where)" else ""))
+        if (cu.phone.isNotBlank()) line("  phone: " + cu.phone)
+        if (cu.notes.isNotBlank()) line("  notes: " + trim(cu.notes))
+        cu.contacts.take(4).forEach { cp ->
+            line("  contact: " + cp.name + (if (cp.jobTitle.isNotBlank()) " — " + cp.jobTitle else "") + (if (cp.phone.isNotBlank()) " " + cp.phone else ""))
+        }
+        store.visits.filter { it.customerId == cu.id || it.client.trim().equals(cu.name.trim(), true) }.sortedByDescending { it.date }.take(3).forEach { v ->
+            val note = v.notesAr.ifBlank { v.notesEn }.ifBlank { v.notes }
+            line("  visit " + v.date + " [" + v.type + "/" + v.outcome + "]" + (if (v.next.isNotBlank()) " next: " + v.next else "") + (if (note.isNotBlank()) " — " + trim(note) else ""))
+        }
+        store.opportunities.filter { it.customerId == cu.id || it.customerName.trim().equals(cu.name.trim(), true) }.take(4).forEach { o ->
+            line("  deal: " + o.title + " " + fmtMoney(o.value) + " " + o.currency + " · " + o.stageEnum().label(en) + (if (o.need.isNotBlank()) " · need: " + trim(o.need, 100) else "") + (if (o.nextStep.isNotBlank()) " · next: " + trim(o.nextStep, 100) else ""))
+        }
+        store.activitiesForCustomer(cu).sortedByDescending { it.date }.take(3).forEach { a ->
+            line("  activity " + a.date + " [" + a.type + "]" + (if (a.summary.isNotBlank()) " — " + trim(a.summary, 140) else ""))
+        }
+    }
+    // Deals / visits matching the question but whose customer wasn't already included.
+    val coveredNames = custs.map { it.name.trim().lowercase() }.toSet()
+    store.opportunities.filter { hit(it.title + " " + it.customerName + " " + it.need + " " + it.notes) && it.customerName.trim().lowercase() !in coveredNames }
+        .sortedByDescending { it.value }.take(5).forEach { o ->
+            line("DEAL: " + o.title + " (" + o.customerName + ") " + fmtMoney(o.value) + " " + o.currency + " · " + o.stageEnum().label(en) + (if (o.nextStep.isNotBlank()) " · next: " + trim(o.nextStep, 100) else ""))
+        }
+    store.visits.filter { hit(it.client + " " + it.notes + " " + it.notesAr + " " + it.notesEn + " " + it.next) && it.client.trim().lowercase() !in coveredNames }
+        .sortedByDescending { it.date }.take(5).forEach { v ->
+            val note = v.notesAr.ifBlank { v.notesEn }.ifBlank { v.notes }
+            line("VISIT: " + v.client + " " + v.date + " [" + v.type + "/" + v.outcome + "]" + (if (note.isNotBlank()) " — " + trim(note) else ""))
+        }
+    return if (sb.isEmpty()) base else base + "\n\nRELEVANT RECORDS (matched to the question):\n" + sb.toString()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceAssistantSheet(store: Store, onDismiss: () -> Unit) {
