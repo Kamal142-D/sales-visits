@@ -7431,7 +7431,6 @@ private fun SettingsScreen(store: Store, account: CloudAccount?, onBack: () -> U
         // ---- AI ----
         SettingsHeader(t["set_ai"])
         AiSection(store)
-        OpenAiSection(store)
 
         // ---- Data & backup ----
         SettingsHeader(t["set_data"])
@@ -7590,53 +7589,6 @@ private fun AiSection(store: Store) {
                 testing = false
                 Toast.makeText(ctx, if (ok) t["ai_test_ok"] else t["ai_failed"], Toast.LENGTH_LONG).show()
             }
-        }
-    }
-}
-
-/** OpenAI key + model for the agentic Assistant tab (separate from the Gemini key above). */
-@Composable
-private fun OpenAiSection(store: Store) {
-    val c = LocalSales.current
-    val t = LocalL.current
-    val ctx = LocalContext.current
-    var key by remember { mutableStateOf(store.openAiKey) }
-    var model by remember { mutableStateOf(store.openAiModel) }
-    GroupCard {
-        Text(t["openai_desc"], fontSize = 12.5.sp, color = c.muted, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp))
-        Column(Modifier.padding(horizontal = 16.dp)) {
-            Text(t["openai_key"], fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 7.dp))
-            TextField(
-                value = key, onValueChange = { key = it; store.chooseOpenAiKey(it) },
-                modifier = Modifier.fillMaxWidth(), placeholder = { Text("sk-…", color = c.faint) }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                shape = RoundedCornerShape(12.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = c.surface, unfocusedContainerColor = c.sunk,
-                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                    focusedTextColor = c.ink, unfocusedTextColor = c.ink, cursorColor = c.ink,
-                ),
-            )
-            Spacer(Modifier.height(10.dp))
-            Text("Model", fontSize = 12.5.sp, color = c.muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 7.dp))
-            TextField(
-                value = model, onValueChange = { model = it; store.chooseOpenAiModel(it) },
-                modifier = Modifier.fillMaxWidth(), placeholder = { Text("gpt-4o-mini", color = c.faint) }, singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = c.surface, unfocusedContainerColor = c.sunk,
-                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                    focusedTextColor = c.ink, unfocusedTextColor = c.ink, cursorColor = c.ink,
-                ),
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                t["get_openai_key"], fontSize = 12.5.sp, color = c.lead, fontWeight = FontWeight.SemiBold,
-                textDecoration = TextDecoration.Underline,
-                modifier = Modifier.clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://platform.openai.com/api-keys"))) } },
-            )
-            Spacer(Modifier.height(12.dp))
         }
     }
 }

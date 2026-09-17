@@ -125,7 +125,11 @@ class CloudSync(private val store: Store) {
             }
             // Null = remote uses a newer schema; never overwrite it with our local copy.
             if (resolved == null) { withContext(Dispatchers.Main) { syncState = "outdated" }; firstSyncDone = true; return }
-            if (resolved != local) withContext(Dispatchers.Main) { store.restoreCloudSnapshot(resolved) }
+            // restoreCloudSnapshot also refuses a future-schema remote — don't advance last / claim synced.
+            if (resolved != local) {
+                val ok = withContext(Dispatchers.Main) { store.restoreCloudSnapshot(resolved) }
+                if (!ok) { withContext(Dispatchers.Main) { syncState = "outdated" }; firstSyncDone = true; return }
+            }
             if (resolved == remote) {
                 store.setCloudPref(lastKey(u), resolved)
                 withContext(Dispatchers.Main) { syncState = if (store.lastMergeConflicts > 0) "conflict" else "synced" }
@@ -210,14 +214,19 @@ class CloudSync(private val store: Store) {
         val (code, text) = httpSend("PATCH", url, body.toString(), token)
         when {
             code in 200..299 -> {
-                if (uid != u) return   // account switched during the network call — result isn't ours
                 store.setCloudPref(lastKey(u), merged)
-                // Reconcile edits made locally during the push (base = what we sent) with the server result.
-                val localNow = store.cloudSnapshot()
-                val reconciled = store.threeWayMerge(snapshot, localNow, merged) ?: merged
-                if (reconciled != localNow) withContext(Dispatchers.Main) { store.restoreCloudSnapshot(reconciled) }
-                withContext(Dispatchers.Main) { syncState = if (store.lastMergeConflicts > 0) "conflict" else "synced" }
-                if (reconciled != merged) queueUpload()   // new local edits appeared mid-push → push them
+                // Do the session check, read-latest, merge, and apply as ONE uninterrupted step on Main,
+                // so a local edit that lands between reading and applying can't be silently overwritten.
+                var pushAgain = false
+                withContext(Dispatchers.Main) {
+                    if (uid != u) return@withContext   // account switched during the network call — not ours
+                    val localNow = store.cloudSnapshot()
+                    val reconciled = store.threeWayMerge(snapshot, localNow, merged) ?: merged
+                    if (reconciled != localNow) store.restoreCloudSnapshot(reconciled)
+                    syncState = if (store.lastMergeConflicts > 0) "conflict" else "synced"
+                    pushAgain = reconciled != merged
+                }
+                if (pushAgain) queueUpload()   // new local edits appeared mid-push → push them
             }
             // Someone else wrote between our read and write: re-read, re-merge, retry.
             attempts > 1 && (code == 409 || code == 412 || text.contains("FAILED_PRECONDITION")) ->

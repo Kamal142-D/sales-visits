@@ -8,13 +8,13 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * The agentic Assistant (its own tab) — powered by OpenAI. It holds a short conversation and can
- * propose ONE action per turn (add / reschedule a follow-up); the app confirms and executes it via
- * Store, so the model interprets while the app stays the source of truth. Answers are grounded in
- * locally-computed [facts] (no invented numbers). Uses the user's own OpenAI key.
+ * The agentic Assistant (its own tab) — powered by Gemini (the same key used for note formatting).
+ * It holds a short conversation and can propose ONE action per turn (add / reschedule a follow-up);
+ * the app confirms and executes it via Store, so the model interprets while the app stays the source
+ * of truth. Answers are grounded in the locally-built [facts] context (no invented numbers).
  */
 object AiAgent {
-    private const val ENDPOINT = "https://api.openai.com/v1/chat/completions"
+    private const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models"
 
     data class Msg(val role: String, val content: String)   // role = "user" | "assistant"
     data class Turn(val reply: String, val intent: CommandIntent)
@@ -22,7 +22,7 @@ object AiAgent {
     suspend fun run(apiKey: String, model: String, history: List<Msg>, facts: String, today: String, english: Boolean): Turn =
         withContext(Dispatchers.IO) {
             val key = apiKey.trim()
-            require(key.isNotBlank()) { "missing_openai_key" }
+            require(key.isNotBlank()) { "missing_key" }
             val lang = if (english) "English" else "Egyptian Arabic"
             val system = """You are VisitFlow's assistant for a field sales rep — a normal conversational AI. Chat naturally in $lang, remember the conversation so far, and answer follow-up questions in context. Be helpful and concise, but it's fine to have a back-and-forth.
 Answer from the CONTEXT below (the rep's own data: today's facts + records relevant to their question). Never invent customer names, numbers, dates, or outcomes that aren't there. If the data doesn't cover something, say so plainly and offer to help another way. Never promise anything to a customer.
@@ -37,30 +37,30 @@ Respond with ONLY a JSON object, no prose around it:
 CONTEXT (the rep's data, computed now):
 $facts"""
 
-            val messages = JSONArray()
-            messages.put(JSONObject().put("role", "system").put("content", system))
-            history.takeLast(12).forEach { messages.put(JSONObject().put("role", it.role).put("content", it.content)) }
-
+            val contents = JSONArray()
+            history.takeLast(12).forEach {
+                val role = if (it.role == "assistant") "model" else "user"
+                contents.put(JSONObject().put("role", role).put("parts", JSONArray().put(JSONObject().put("text", it.content))))
+            }
             val body = JSONObject()
-                .put("model", model.trim().ifBlank { "gpt-4o-mini" })
-                .put("messages", messages)
-                .put("temperature", 0.3)
-                .put("response_format", JSONObject().put("type", "json_object"))
+                .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+                .put("contents", contents)
+                .put("generationConfig", JSONObject().put("temperature", 0.3).put("responseMimeType", "application/json"))
 
-            val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
+            val url = URL("$ENDPOINT/${model.trim().ifBlank { "gemini-2.5-flash" }}:generateContent?key=$key")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"; connectTimeout = 20000; readTimeout = 90000; doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                setRequestProperty("Authorization", "Bearer $key")
             }
             try {
                 conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 if (conn.responseCode !in 200..299) {
                     val err = runCatching { conn.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull().orEmpty()
-                    throw Exception(openAiError(err, conn.responseCode))
+                    throw Exception(geminiError(err, conn.responseCode))
                 }
                 val root = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-                val content = root.optJSONArray("choices")?.optJSONObject(0)
-                    ?.optJSONObject("message")?.optString("content").orEmpty().trim()
+                val content = root.optJSONArray("candidates")?.optJSONObject(0)
+                    ?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text").orEmpty().trim()
                 parse(content)
             } finally {
                 conn.disconnect()
@@ -68,7 +68,9 @@ $facts"""
         }
 
     private fun parse(content: String): Turn {
-        val obj = runCatching { JSONObject(content) }.getOrNull()
+        // The model may wrap JSON in stray text/code fences; extract the outermost object.
+        val json = content.substringAfter('{', "").let { if (it.isBlank()) "" else "{" + it.substringBeforeLast('}') + "}" }
+        val obj = runCatching { JSONObject(if (json.isBlank()) content else json) }.getOrNull()
             ?: return Turn(content.ifBlank { "…" }, CommandIntent())
         val reply = obj.optString("reply").ifBlank { "…" }
         val a = obj.optJSONObject("action")
@@ -88,11 +90,11 @@ $facts"""
         return Turn(reply, intent)
     }
 
-    private fun openAiError(body: String, code: Int): String {
+    private fun geminiError(body: String, code: Int): String {
         val msg = runCatching { JSONObject(body).optJSONObject("error")?.optString("message") }.getOrNull()
         return when {
-            code == 401 -> "invalid_openai_key"
-            code == 429 -> "openai_rate_limited"
+            code == 400 && (msg?.contains("API key", true) == true || msg?.contains("API_KEY", true) == true) -> "invalid_key"
+            code == 429 -> "rate_limited"
             !msg.isNullOrBlank() -> msg
             else -> "HTTP $code"
         }

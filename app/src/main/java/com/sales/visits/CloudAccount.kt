@@ -68,6 +68,10 @@ class CloudAccount(context: Context, private val store: Store) {
             syncState = "local"
             return
         }
+        // Isolate accounts IMMEDIATELY on switch (from local storage, no network): stash the outgoing
+        // account's data and load this one's, so no screen can read/upload the previous account's data
+        // during the window before the first server snapshot arrives.
+        store.prepareForAccount(next.uid)
         profile = loadProfile(next)
         syncState = "syncing"
         listener = stateRef(next.uid).addSnapshotListener(com.google.firebase.firestore.MetadataChanges.INCLUDE) { snapshot, error ->
@@ -106,8 +110,7 @@ class CloudAccount(context: Context, private val store: Store) {
     }
 
     private fun resolveFirstSync(uid: String, remote: String?) {
-        // Drop a previous account's leftover local data before merging, so accounts stay isolated.
-        store.prepareForAccount(uid)
+        // (Account isolation already ran in connect(), before any snapshot.)
         val local = store.cloudSnapshot()
         if (remote.isNullOrBlank()) {
             upload(local)
@@ -122,7 +125,8 @@ class CloudAccount(context: Context, private val store: Store) {
         // A null merge means the remote uses a newer schema than this app understands. Do NOT fall back
         // to overwriting it with our local copy — that would erase the newer fields. Ask the user to update.
         if (resolved == null) { syncState = "outdated"; return }
-        if (resolved != local) store.restoreCloudSnapshot(resolved)
+        // restoreCloudSnapshot also refuses a future-schema remote (returns false) — don't claim "synced".
+        if (resolved != local && !store.restoreCloudSnapshot(resolved)) { syncState = "outdated"; return }
         if (resolved == remote) {
             // Nothing new to push; remote is already the agreed state.
             saveLast(uid, resolved)

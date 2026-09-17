@@ -657,9 +657,13 @@ private val AR_MAP = mapOf(
     "agent_ex3" to "ضيف متابعة لأحمد بكرة الساعة ١٠ الصبح",
     "agent_thinking" to "بيفكّر…",
     "agent_clear" to "مسح",
-    "agent_need_key" to "محتاج مفتاح OpenAI — ضيفه من الإعدادات.",
-    "agent_bad_key" to "مفتاح OpenAI غير صحيح.",
-    "agent_rate" to "طلبات كتير على OpenAI، جرّب بعد شوية.",
+    "agent_need_key" to "محتاج مفتاح Gemini — ضيفه من الإعدادات ← المساعد الذكي.",
+    "agent_bad_key" to "مفتاح Gemini غير صحيح.",
+    "agent_rate" to "طلبات كتير على Gemini، جرّب بعد شوية.",
+    "agent_consent_desc" to "المساعد بيبعت سؤالك + ملخّص يومك وسجلات مرتبطة (أسماء عملاء، أرقام، ملاحظات، زيارات، فرص) لخدمة Google Gemini عشان يجاوبك. توافق؟",
+    "agent_bad_datetime" to "التاريخ أو الوقت اللي طلع مش صحيح — عدّله وجرّب تاني.",
+    "agent_which_task" to "مش واضح أنهي متابعة تقصد — سمّي العميل أو المهمة.",
+    "agent_pick_task" to "فيه أكتر من متابعة مطابقة — اختار المقصودة:",
 )
 
 private val EN_MAP = mapOf(
@@ -1312,9 +1316,13 @@ private val EN_MAP = mapOf(
     "agent_ex3" to "Add a follow-up with Ahmed tomorrow at 10am",
     "agent_thinking" to "Thinking…",
     "agent_clear" to "Clear",
-    "agent_need_key" to "Needs an OpenAI key — add it in Settings.",
-    "agent_bad_key" to "That OpenAI key isn't valid.",
-    "agent_rate" to "OpenAI is rate-limiting; try again shortly.",
+    "agent_need_key" to "Needs a Gemini key — add it in Settings → AI assistant.",
+    "agent_bad_key" to "That Gemini key isn't valid.",
+    "agent_rate" to "Gemini is rate-limiting; try again shortly.",
+    "agent_consent_desc" to "The assistant sends your question plus today's summary and related records (customer names, numbers, notes, visits, deals) to Google Gemini to answer. Proceed?",
+    "agent_bad_datetime" to "The date/time it produced isn't valid — adjust it and try again.",
+    "agent_which_task" to "Not sure which follow-up you mean — name the customer or task.",
+    "agent_pick_task" to "More than one follow-up matches — pick the one you mean:",
 )
 
 val AR = L(false, AR_MAP)

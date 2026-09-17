@@ -59,6 +59,8 @@ fun AssistantScreen(store: Store) {
     var pending by remember { mutableStateOf<CommandIntent?>(null) }
     var listening by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(false) }
+    var consentAsk by remember { mutableStateOf(false) }
+    var pendingSend by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
     val tts = remember {
@@ -78,13 +80,15 @@ fun AssistantScreen(store: Store) {
     fun send(text: String) {
         val q = text.trim()
         if (q.isBlank() || loading) return
-        if (store.openAiKey.isBlank()) { messages.add(ChatMsg("result", t["agent_need_key"])); return }
+        if (store.apiKey.isBlank()) { messages.add(ChatMsg("result", t["agent_need_key"])); return }
+        // First use: get explicit consent before sending the rep's data to the AI provider.
+        if (!store.aiConsent) { pendingSend = q; consentAsk = true; input = ""; return }
         messages.add(ChatMsg("user", q)); input = ""; loading = true; pending = null
         val history = messages.filter { it.role == "user" || it.role == "assistant" }.map { AiAgent.Msg(if (it.role == "user") "user" else "assistant", it.text) }
         scope.launch {
             try {
                 val facts = assistantContext(store, q, t.en)
-                val turn = AiAgent.run(store.openAiKey, store.openAiModel, history, facts, todayIso(), t.en)
+                val turn = AiAgent.run(store.apiKey, store.aiModel, history, facts, todayIso(), t.en)
                 messages.add(ChatMsg("assistant", turn.reply)); speak(turn.reply)
                 if (turn.intent.action == CommandAction.ADD_TASK || turn.intent.action == CommandAction.RESCHEDULE_TASK) pending = turn.intent
             } catch (e: Exception) {
@@ -198,6 +202,13 @@ fun AssistantScreen(store: Store) {
             }
         }
     }
+
+    if (consentAsk) AlertDialog(
+        onDismissRequest = { consentAsk = false; pendingSend = "" },
+        confirmButton = { TextButton(onClick = { store.grantAiConsent(); consentAsk = false; val p = pendingSend; pendingSend = ""; send(p) }) { Text(t["agree"]) } },
+        dismissButton = { TextButton(onClick = { consentAsk = false; pendingSend = "" }) { Text(t["cancel"], color = c.muted) } },
+        title = { Text(t["ai_consent_title"]) }, text = { Text(t["agent_consent_desc"]) }, containerColor = c.surface,
+    )
 }
 
 @Composable
@@ -219,6 +230,16 @@ private fun ChatBubble(m: ChatMsg) {
     }
 }
 
+private fun isValidDate(s: String): Boolean = runCatching { java.time.LocalDate.parse(s.trim()) }.isSuccess
+private fun isValidTime(s: String): Boolean {
+    if (s.isBlank()) return true
+    val p = s.trim().split(":")
+    if (p.size != 2) return false
+    val h = p[0].toIntOrNull() ?: return false
+    val m = p[1].toIntOrNull() ?: return false
+    return h in 0..23 && m in 0..59
+}
+
 @Composable
 private fun ActionCard(store: Store, intent: CommandIntent, resolve: (String) -> Customer?, onDone: (String) -> Unit, onCancel: () -> Unit) {
     val c = LocalSales.current
@@ -226,44 +247,68 @@ private fun ActionCard(store: Store, intent: CommandIntent, resolve: (String) ->
     Surface(shape = RoundedCornerShape(16.dp), color = c.sunk, border = androidx.compose.foundation.BorderStroke(1.dp, c.ink), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp)) {
             if (intent.action == CommandAction.ADD_TASK) {
+                val date = intent.date.ifBlank { todayIso() }
+                val dateOk = isValidDate(date)
+                val timeOk = isValidTime(intent.time)
                 Text(t["cmd_add_task"], color = c.muted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
                 Text(intent.text.ifBlank { "—" }, color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 val meta = listOfNotNull(
                     intent.customer.takeIf { it.isNotBlank() }?.let { "@$it" },
-                    intent.date.takeIf { it.isNotBlank() }?.let { fullDay(it) },
-                    intent.time.takeIf { it.isNotBlank() }?.let { fmtTime(it) },
+                    if (dateOk) fullDay(date) else null,
+                    intent.time.takeIf { it.isNotBlank() && timeOk }?.let { fmtTime(it) },
                 ).joinToString(" · ")
                 if (meta.isNotBlank()) { Spacer(Modifier.height(3.dp)); Text(meta, color = c.muted, fontSize = 12.5.sp) }
+                if (!dateOk || !timeOk) { Spacer(Modifier.height(4.dp)); Text(t["agent_bad_datetime"], color = c.lost, fontSize = 11.5.sp) }
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ConfirmButton(t["cmd_confirm"], enabled = intent.text.isNotBlank(), modifier = Modifier.weight(1f)) {
-                        val date = intent.date.ifBlank { todayIso() }
+                    ConfirmButton(t["cmd_confirm"], enabled = intent.text.isNotBlank() && dateOk && timeOk, modifier = Modifier.weight(1f)) {
                         if (taskExists(store.tasks, intent.customer, intent.text, date)) onDone(t["cmd_dup"])
-                        else { store.addTask(intent.text, intent.customer, date, intent.time, source = TaskSource.AI); onDone(t["cmd_added"]) }
+                        else { store.addTask(intent.text, intent.customer, date, if (timeOk) intent.time else "", source = TaskSource.AI); onDone(t["cmd_added"]) }
                     }
                     Spacer(Modifier.width(8.dp))
                     TextButton(onClick = onCancel) { Text(t["cancel"], color = c.muted) }
                 }
             } else {
-                val q = intent.query.ifBlank { intent.text }.ifBlank { intent.customer }
-                val match = store.tasks.firstOrNull {
+                val q = intent.query.ifBlank { intent.text }.ifBlank { intent.customer }.trim()
+                val matches = if (q.isBlank()) emptyList() else store.tasks.filter {
                     it.statusEnum() != TaskStatus.DONE && it.statusEnum() != TaskStatus.CANCELLED &&
                         (it.action.contains(q, true) || it.client.contains(q, true))
                 }
-                if (match == null) Text(t["cmd_task_not_found"], color = c.muted, fontSize = 13.sp)
-                else {
-                    Text(t["cmd_reschedule"], color = c.muted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Text(match.action.ifBlank { match.client }, color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text("${fullDay(match.date)} → ${if (intent.date.isNotBlank()) fullDay(intent.date) else "—"}", color = c.muted, fontSize = 12.5.sp)
-                    Spacer(Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        ConfirmButton(t["cmd_confirm"], enabled = intent.date.isNotBlank(), modifier = Modifier.weight(1f)) {
-                            store.rescheduleTask(match.id, intent.date); onDone(t["cmd_moved"])
+                var chosen by remember(intent) { mutableStateOf(if (matches.size == 1) matches.first() else null) }
+                val dateOk = isValidDate(intent.date)
+                Text(t["cmd_reschedule"], color = c.muted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                when {
+                    q.isBlank() -> Text(t["agent_which_task"], color = c.muted, fontSize = 13.sp)
+                    matches.isEmpty() -> Text(t["cmd_task_not_found"], color = c.muted, fontSize = 13.sp)
+                    chosen == null -> {
+                        // Ambiguous: let the rep pick the exact follow-up.
+                        Text(t["agent_pick_task"], color = c.ink2, fontSize = 13.sp)
+                        Spacer(Modifier.height(6.dp))
+                        matches.take(6).forEach { m ->
+                            Surface(onClick = { chosen = m }, shape = RoundedCornerShape(12.dp), color = c.surface, border = BorderStroke(1.dp, c.edge), modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                                Column(Modifier.padding(10.dp)) {
+                                    Text(m.action.ifBlank { m.client }, color = c.ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text(listOf(m.client, fullDay(m.date)).filter { it.isNotBlank() }.joinToString(" · "), color = c.muted, fontSize = 12.sp)
+                                }
+                            }
                         }
-                        Spacer(Modifier.width(8.dp))
-                        TextButton(onClick = onCancel) { Text(t["cancel"], color = c.muted) }
+                    }
+                    else -> {
+                        val m = chosen!!
+                        Text(m.action.ifBlank { m.client }, color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        if (m.client.isNotBlank()) Text("@${m.client}", color = c.muted, fontSize = 12.5.sp)
+                        Text("${fullDay(m.date)} → ${if (dateOk) fullDay(intent.date) else "—"}", color = c.muted, fontSize = 12.5.sp)
+                        if (!dateOk) { Spacer(Modifier.height(4.dp)); Text(t["agent_bad_datetime"], color = c.lost, fontSize = 11.5.sp) }
+                        Spacer(Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ConfirmButton(t["cmd_confirm"], enabled = dateOk, modifier = Modifier.weight(1f)) {
+                                store.rescheduleTask(m.id, intent.date); onDone(t["cmd_moved"])
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(onClick = onCancel) { Text(t["cancel"], color = c.muted) }
+                        }
                     }
                 }
             }
@@ -287,8 +332,8 @@ private fun ConfirmButton(label: String, enabled: Boolean, modifier: Modifier = 
 }
 
 private fun agentError(msg: String?, t: L): String = when (msg) {
-    "invalid_openai_key" -> t["agent_bad_key"]
-    "openai_rate_limited" -> t["agent_rate"]
-    "missing_openai_key" -> t["agent_need_key"]
+    "invalid_key" -> t["agent_bad_key"]
+    "rate_limited" -> t["agent_rate"]
+    "missing_key" -> t["agent_need_key"]
     else -> msg ?: "error"
 }
