@@ -3,18 +3,19 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Opening quotation mark (two bold "66" glyphs) -->
+    <!-- Top: three dots (a dashed line) -->
     <path
-        android:fillColor="#26262B"
-        android:pathData="M44,30 a7,7 0 1,0 0,14 a7,7 0 1,0 0,-14 z M38,39 L47,41 L40,48 z M60,30 a7,7 0 1,0 0,14 a7,7 0 1,0 0,-14 z M54,39 L63,41 L56,48 z" />
-    <!-- Three text lines -->
+        android:fillColor="#141414"
+        android:pathData="M28,29 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z M42,29 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z M56,29 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z" />
+    <!-- Two black bars -->
     <path
-        android:fillColor="#C4C4C4"
-        android:pathData="M34,54 H72 A3,3 0 0,1 72,60 H34 A3,3 0 0,1 34,54 Z" />
+        android:fillColor="#141414"
+        android:pathData="M32,40 H76 A6,6 0 0,1 76,52 H32 A6,6 0 0,1 32,40 Z" />
     <path
-        android:fillColor="#C4C4C4"
-        android:pathData="M34,64 H68 A3,3 0 0,1 68,70 H34 A3,3 0 0,1 34,64 Z" />
+        android:fillColor="#141414"
+        android:pathData="M32,57 H76 A6,6 0 0,1 76,69 H32 A6,6 0 0,1 32,57 Z" />
+    <!-- Gold bottom bar -->
     <path
-        android:fillColor="#C4C4C4"
-        android:pathData="M34,74 H54 A3,3 0 0,1 54,80 H34 A3,3 0 0,1 34,74 Z" />
+        android:fillColor="#F5B301"
+        android:pathData="M32,74 H76 A6,6 0 0,1 76,86 H32 A6,6 0 0,1 32,74 Z" />
 </vector>
